@@ -285,7 +285,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % Lazily build PowerBoxes
             obj = obj.PopulatePowerBoxes(app);
         
-            stageSize_um          = getFOVSizeFromZoom(app.Zoom_Factor_Spinner.Value);
+            stageSize_um          = getFOVfromZoom(app.Zoom_Factor_Spinner.Value);
             beamWaistDiameter_um = app.Settings.BeamWaistDiameter_um;
         
             numTiles = numel(obj.PowerBoxes);

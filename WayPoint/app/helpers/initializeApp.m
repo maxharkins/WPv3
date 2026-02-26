@@ -8,7 +8,7 @@ function initializeApp(hWP)
 
     % SETTINGS:
     hWP.Settings.ZoomFactor             = hWP.Zoom_Factor_Spinner.Value;
-    hWP.Settings.FOVSize_um             = getFOVSizeFromZoom(hWP.Settings.ZoomFactor);
+    hWP.Settings.FOVSize_um             = getFOVfromZoom(hWP.Settings.ZoomFactor);
     hWP.Settings.TileOverlap_um         = hWP.Tile_Overlap_Edit_Field.Value;
     hWP.Settings.Power_pct              = hWP.Power_Edit_Field.Value;
     hWP.Settings.PixelDwellTime_ms      = hWP.Pixel_Dwell_Time_Edit_Field.Value;
@@ -56,11 +56,7 @@ function initializeApp(hWP)
     init3Dplot(hWP);
 
 
-    
-
-    hWP.hScanController = ScanController();
-    hWP.hAblationSequence = AblationSequence;
-
+   
     refreshPlot(hWP);
     axis(hWP.Axes_XYZ, 'equal');
 end
