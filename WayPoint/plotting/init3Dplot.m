@@ -11,6 +11,7 @@ function init3Dplot(obj)
     zlim(obj.Axes_XYZ, [-50, 50]);
 
     axis(obj.Axes_XYZ, 'off');
+    obj.Axes_XYZ.Clipping = 'off';
     set(obj.Axes_XYZ, 'ZDir', 'reverse')
 
 end

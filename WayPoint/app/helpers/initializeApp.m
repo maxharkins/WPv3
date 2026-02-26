@@ -16,7 +16,7 @@ function initializeApp(hWP)
     hWP.Settings.QuantFactorZ_um        = hWP.Z_Quant_Factor_Edit_Field.Value;
     hWP.Settings.BeamWaistDiameter_um   = hWP.Beam_Waist_Diameter_Edit_Field.Value;
     hWP.Settings.FramesPerSlice         = 1;
-    hWP.Settings.ZTraversalMode         = 'descending';
+    hWP.Settings.ZTraversalMode         = queryZTraversalMode(hWP);
 
     init3Dplot(hWP);
     

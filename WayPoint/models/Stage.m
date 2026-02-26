@@ -26,7 +26,7 @@ classdef Stage
             if isempty(obj.Position) || isempty(obj.Size)
                 return;
             end
-            obj.Size        = app.Settings.FOVSize_um;
+            obj.Size        = [app.Settings.FOVSize_um, app.Settings.FOVSize_um];
             
             halfSize = obj.Size / 2;
             obj.Rectangle = [obj.Position(1:2) - halfSize, obj.Size(1:2)];

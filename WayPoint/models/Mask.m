@@ -56,7 +56,7 @@ classdef Mask
                 obj.hTri.TransformedPoints = obj.hTri.BasePoints + obj.Position;
             end
 
-            % Update geometry for hNodes
+            % Update geometry for hNodes 
             if ~isempty(obj.hNodes.BasePoints)
                 obj.hNodes.TransformedPoints = obj.hNodes.BasePoints + obj.Position;
                 obj.hNodes.ArbitraryZs = sortrows(unique(obj.hNodes.TransformedPoints(:,3)), 'descend');

@@ -18,6 +18,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
     properties
         MeshEdgeLayers   % struct array from slicer
         isMeshScan = false
+        isEffectively2D = false;
     end
     properties
         hWP
@@ -229,7 +230,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             end
         end
 
-        function tf = isEffectively2D(obj)
+        function tf = queryIsEffectively2D(obj)
             tf = true;
         
             if isempty(obj.ArbitraryZs)
@@ -247,10 +248,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     return;
                 end
             end
+            
         end
 
         function obj = getScanPaths(obj, app)
             prepSequence(app)
+            obj.isEffectively2D = false; % initialize
             if obj.isMeshScan
                 % ======================================================
                 % STL / Mesh workflow
@@ -313,8 +316,8 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % ==========================================================
             % AUTO-EXTRUDE 2D PATHS IF REQUESTED
             % ==========================================================
-            
-            if isEffectively2D(obj)
+            obj.isEffectively2D = obj.queryIsEffectively2D();
+            if obj.isEffectively2D
             
                 zStart = app.Extrusion_Z_Start_Edit_Field.Value;
                 zEnd   = app.Extrusion_Z_End_Edit_Field.Value;
