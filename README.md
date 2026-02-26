@@ -52,12 +52,12 @@
 ## 5) Resampling and Beam Waist
 
 ### Assumptions
-- Path density should track optical spot size.
+- Path density should track optical spot size (beam waist).
 - Default beam waist diameter is 0.8 um.
 
 ### Mechanics
 - UI setting `Beam Waist Diameter (um)` drives spacing used for generated paths (`cfg.xySpacing`).
-- Tighter beam waist -> denser XY samples; larger beam waist -> sparser samples.
+- Tighter beam waist -> denser XY rasters; larger beam waist -> sparser rasters.
 - In mask-image path conversion (`getPathXYfromImg`), fallback default is `0.8` when unspecified.
 - Keep XY quantization and beam-waist spacing consistent; mismatched values can over/under-sample path detail.
 
@@ -115,8 +115,9 @@
 
 ## 10) Current Risk Notes
 
-1. Fixed galvo fallback indices (`118/119`) may not match all ScanImage configurations.
+1. Hardcoded galvo fallback indices (`118/119`) may not match all ScanImage configurations.
 2. Very small `Pixel Dwell Time (ms)` values can imply impractically high AO sample rates.
-3. XY stage serial conversion (`2.5 um/step`) is hard-coded and should be calibrated per stage/controller.
+3. XY stage serial conversion (`2.5 um/step`) is hard-coded and should be calibrated per stage/controller. moveStage.m would be replaced in the future with an API wrapper for a more advanced stage.
 4. Offset stacking and coordinate transforms should be validated after import to avoid double-translation.
 5. Hard XY bounds checks may reject valid paths on larger calibrated FOVs.
+6. Current XY stage is very lousy. It inadvertently moves the sample in Z while moving in X,Y. 
