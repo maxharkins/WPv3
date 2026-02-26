@@ -15,7 +15,23 @@
 
 ### Assumptions
 - Geometry or scan paths are available as `.stl` or `.txt`.
-- Settings are configured before running (`Zoom`, overlap, XY/Z quantization, beam waist, power, PDT).
+     - `.txt` files may either be 2D or 3D coordinates, or `ScanPaths`.
+     - 2D layers may be extruded abitrarily by configuring Extrusion Settings.
+- Configured before fetching `ScanPaths`:
+   -    a) `Zoom`
+   -    b) `Tile Overlap (µm)`
+   -    c) `Quant Factor XY (µm)`
+   -    d) `Quant Factor Z (µm)`
+   -    e) `Beam Waist ⌀ (µm)`
+   -    e) Extrusion Settings
+   -    f) XY mask position
+- Configured before executing `ScanPaths`:
+   -    a) `Power (%)`
+   -    b) `Pixel Dwell Time (ms)`
+   -    c) `Start Z Stack` (Z Transversal)
+   -    d) Z mask position
+
+- IMPORTANT: Make sure stage is zeroed before . To prevent accidentally ramming the objective lens into the sample, there will be an error if too large of a jump is made (>800µm).
 
 ### Mechanics
 1. `Import File`.
@@ -101,7 +117,7 @@
 
 ### Known bugs
 1. **Forced discontinuity in scan-path generation (X or Y phase anchor)**
-   - There is a discontinuity introduced during path binning/phase selection to avoid skipping a full line, but is not optimal.
+   - There is a discontinuity introduced during path binning/phase selection to avoid skipping a full line, but the path is not yet optimal.
    - Current behavior can break local pattern continuity and produce visible segmentation artifacts.
 2. **Unexpected extra text box in transform flow (`applyScaleRotateAndCenter`)**
    - An extra UI text edit field appears during the normalization/rotation confirmation step.
@@ -112,7 +128,7 @@
 2. Add UI controls/menu actions for scale/rotate/center so transforms are discoverable and repeatable.
 3. Make the normalize/scale/orient transform flow callable at any time, not only immediately after import.
 4. Plot all Z layers of auto-extruded files in the 3D view (not just current slice/path subset).
-
+5. Depending on next success, convert all `Pixel Dwell Time (ms)` to `Pixel Dwell Time (µs)`.
 ## 10) Current Risk Notes
 
 1. Hardcoded galvo fallback indices (`118/119`) may not match all ScanImage configurations.
