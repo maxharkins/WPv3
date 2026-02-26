@@ -170,9 +170,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     end
                 end
             end
-        
-            % CRITICAL: prevent double application later
-            % obj.hWP.hMask.Position = [0 0 0];
         end
         function obj = extrudeSingleLayer(obj, numCopies, zStep_um, filePath)
             % ------ Parameters ------
@@ -277,7 +274,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 toc
                 
                 obj.dispStats();
-                %obj = obj.applyMaskOffsetToScanPaths();
                 return;
             end
         
@@ -343,7 +339,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 end
             end
             obj.dispStats();
-            %obj = obj.applyMaskOffsetToScanPaths();
         end
         function dispStats(obj)
             fprintf('\n================ STACK SUMMARY ================\n');
@@ -455,8 +450,8 @@ classdef Stacks < handle & matlab.mixin.SetGet
             fprintf('ScanPaths successfully written to %s\n', filename);
         end
 
-        function coords_XYZ = importScanPaths(obj, filename)
-        % importScanPaths reconstructs obj.ScanPaths and obj.ArbitraryZs
+        function coords_XYZ = importAndCenterScanPaths(obj, filename)
+        % importAndCenterScanPaths reconstructs obj.ScanPaths and obj.ArbitraryZs
         % from a text file written by exportScanPaths.
         %
         % ALSO:
@@ -466,7 +461,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         %   - Assigns nodes to hMask.hNodes for plotting
         %   - Resets mask position to prevent double-translation
         %
-        %   coords_XYZ = obj.importScanPaths('ScanPathsOutput.txt')
+        %   coords_XYZ = obj.importAndCenterScanPaths('ScanPathsOutput.txt')
         
             if nargin < 2 || isempty(filename)
                 filename = 'ScanPaths.txt';

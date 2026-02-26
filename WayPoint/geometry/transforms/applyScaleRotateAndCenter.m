@@ -1,14 +1,13 @@
-function data = confirmAndNormalizeSize(data)
-% confirmAndNormalizeSize
+function data = applyScaleRotateAndCenter(data)
+% applyScaleRotateAndCenter
 %   - Assumes imported coordinates are in microns
 %   - Allows user to correct scale if source units were wrong
+%   - Optionally applies discrete 3D orientation
 %   - Centers geometry at origin
 
     % ------------------------------------------------------------
     % Select coordinate field
     % ------------------------------------------------------------
-    
-
     if isfield(data, 'xyz')
         coords = data.xyz;
         coordField = 'xyz';
@@ -18,9 +17,8 @@ function data = confirmAndNormalizeSize(data)
         coordField = 'raw';
         label = 'Coordinate geometry';
 
-        % make sure its nx3
         assert(size(coords,2) == 3, ...
-            'confirmAndNormalizeSize expects Nx3 coordinate data.');
+            'applyScaleRotateAndCenter expects Nx3 coordinate data.');
     else
         error('Data struct has no coordinate field.');
     end
@@ -46,7 +44,7 @@ function data = confirmAndNormalizeSize(data)
         'Optional: uniform scale factor (advanced):'
     };
 
-    answer = inputdlg(prompt, 'Confirm Size', [4 60; 1 60; 1 60]);
+    answer = inputdlg(prompt, 'Confirm Scale', [4 60; 1 60; 1 60]);
 
     if isempty(answer)
         error('Import cancelled by user.');
@@ -63,7 +61,7 @@ function data = confirmAndNormalizeSize(data)
     elseif ~isnan(manualScale) && manualScale > 0
         scale = manualScale;
     else
-        scale = 1;   % accept imported scale as-is
+        scale = 1;
     end
 
     if ~isfinite(scale) || scale <= 0
@@ -71,12 +69,12 @@ function data = confirmAndNormalizeSize(data)
     end
 
     if size(coords,2) == 3 && size(coords,1) >= 3
-        if isfield(data,"faces") % plot surf instead
+        if isfield(data, "faces")
             faces = data.faces;
         else
             faces = [];
         end
-        [coordsRot, didApply] = rotate3DGui(coords, 'Title', ['Rotate: ' label], 'Faces',faces, 'UseScatter',false);
+        [coordsRot, didApply] = rotate3DGui(coords, 'Title', ['Rotate: ' label], 'Faces', faces, 'UseScatter', false);
         if didApply
             coords = coordsRot;
         end
@@ -86,7 +84,6 @@ function data = confirmAndNormalizeSize(data)
     % Apply scaling and centering
     % ------------------------------------------------------------
     coords = coords * scale;
-
     ctr = (max(coords,[],1) + min(coords,[],1)) / 2;
     coords = coords - ctr;
 

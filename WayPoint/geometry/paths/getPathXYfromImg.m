@@ -1,6 +1,6 @@
-function [pathXY] = getPathXYfromImg(img, stageSize, beamWaist)
-    if nargin < 3 || isempty(beamWaist)
-        beamWaist = 0.8; % microns per pixel
+function [pathXY] = getPathXYfromImg(img, stageSize, beamWaistDiameter_um)
+    if nargin < 3 || isempty(beamWaistDiameter_um)
+        beamWaistDiameter_um = 0.8; % microns (diameter spacing)
     end
     if nargin < 2 || isempty(stageSize)
         stageSize = round(size(img,1));
@@ -9,7 +9,7 @@ function [pathXY] = getPathXYfromImg(img, stageSize, beamWaist)
     stageSize = round(stageSize(1));
 
     imgRes = size(img,1) / stageSize;
-    desRes = 1/beamWaist;
+    desRes = 1/beamWaistDiameter_um;
 
     % scale img
     img = rot90(img,1);
@@ -93,7 +93,7 @@ function [pathXY] = getPathXYfromImg(img, stageSize, beamWaist)
             pathXY = [pathXY; ep_R_CURR; ep_L_CURR];
         end
     end
-    pathXY = pathXY * beamWaist;
+    pathXY = pathXY * beamWaistDiameter_um;
 
 end
 

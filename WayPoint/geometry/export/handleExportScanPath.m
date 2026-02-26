@@ -20,27 +20,27 @@ function handleExportScanPath(app)
         app.hStacks.isEffectively2D = app.hStacks.queryIsEffectively2D();
     end
 
-    % XY spacing comes from scan quantization settings.
-    XY_interval = app.Settings.QuantFactorXY_um;
+    % XY quantization step comes from scan quantization settings.
+    xyQuantStep_um = app.Settings.QuantFactorXY_um;
 
     % Z spacing source depends on dimensionality:
     % - effectively 2D: use extrusion step size
     % - true 3D: use configured Z quantization
     if app.hStacks.isEffectively2D
-        Z_interval = app.Extrusion_Z_Step_Size_Edit_Field.Value;
+        zStep_um = app.Extrusion_Z_Step_Size_Edit_Field.Value;
     else
-        Z_interval = app.Settings.QuantFactorZ_um;
+        zStep_um = app.Settings.QuantFactorZ_um;
     end
 
     % Make a filesystem-friendly name (replace '.' with 'p').
-    xyStr = strrep(sprintf('%.4g', XY_interval), '.', 'p');
-    zStr  = strrep(sprintf('%.4g', Z_interval),  '.', 'p');
+    xyStr = strrep(sprintf('%.4g', xyQuantStep_um), '.', 'p');
+    zStr  = strrep(sprintf('%.4g', zStep_um),  '.', 'p');
     suggestedName = sprintf('ScanPaths_Z-interval-%sum_XY-interval-%sum.txt', zStr, xyStr);
 
     % Prompt user for save path; no-op on cancel.
     [fileName, folderPath] = uiputfile( ...
         {'*.txt', 'Text Files (*.txt)'}, ...
-        'Export ScanPath', ...
+        'Export ScanPaths', ...
         suggestedName);
 
     if isequal(fileName, 0) || isequal(folderPath, 0)
@@ -53,8 +53,8 @@ function handleExportScanPath(app)
 
     % Confirm success in UI; fallback to console if alert fails.
     try
-        uialert(app.UIFigure, sprintf('ScanPath export complete.\n%s', outPath), 'Export Complete');
+        uialert(app.UIFigure, sprintf('ScanPaths export complete.\n%s', outPath), 'Export Complete');
     catch
-        fprintf('ScanPath export complete: %s\n', outPath);
+        fprintf('ScanPaths export complete: %s\n', outPath);
     end
 end

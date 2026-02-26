@@ -16,6 +16,13 @@ function importFile(obj, filePath)
     ext = lower(ext);
 
     % ------------------------------------------------------------
+    % Clear previous import state before loading new content
+    % ------------------------------------------------------------
+    obj.hMask = Mask();
+    obj.hStacks = Stacks.empty;
+    refreshPlot(obj);
+
+    % ------------------------------------------------------------
     % Dispatch by file type
     % ------------------------------------------------------------
     switch ext
@@ -26,7 +33,7 @@ function importFile(obj, filePath)
             % Parse STL → triangulation
             % ------------------------------------------------------------
             vol = parseSTLFile(filePath);
-            vol = confirmAndNormalizeSize(vol); % GUI step    
+            vol = applyScaleRotateAndCenter(vol); % GUI step
             T = triangulation(vol.faces, vol.xyz); 
             % ------------------------------------------------------------
             % Build layered scan paths directly
@@ -56,7 +63,7 @@ function importFile(obj, filePath)
 
             if isScanPathTXT(filePath)
             
-                coords_XYZ= obj.hStacks.importScanPaths(filePath);
+                coords_XYZ= obj.hStacks.importAndCenterScanPaths(filePath);
                 zMin = min(coords_XYZ(:,3));
                 zMax = max(coords_XYZ(:,3));
                 zCenter = (zMin + zMax) / 2;
@@ -80,7 +87,7 @@ function importFile(obj, filePath)
                     xyz = data.raw;
         
                     % purely numeric normalization (no faces)
-                    xyz = confirmAndNormalizeSize(struct('raw', xyz));
+                    xyz = applyScaleRotateAndCenter(struct('raw', xyz));
         
                     assignMask(obj, xyz.raw, wellCentroid);
         
@@ -96,13 +103,13 @@ function importFile(obj, filePath)
                     xyz = [xy, repmat(z0, size(xy,1), 1)];
         
                     % normalize as point data
-                    xyz = confirmAndNormalizeSize(struct('raw', xyz));
+                    xyz = applyScaleRotateAndCenter(struct('raw', xyz));
         
                     assignMask(obj, xyz.raw, wellCentroid);
         
                 case 'ScanPath'
 
-                    coords_XYZ = obj.hStacks.importScanPaths(filePath);
+                    coords_XYZ = obj.hStacks.importAndCenterScanPaths(filePath);
                 
                     % Optional safety check
                     if isempty(coords_XYZ)

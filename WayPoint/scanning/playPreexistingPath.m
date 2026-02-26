@@ -7,7 +7,8 @@ function [stats, model] = playPreexistingPath(hX, hY, x_um, y_um, PDT_s, varargi
 % PDT_s : pixel dwell time [s]
 %
 % Name/Value:
-%   'Dot_um'       (0.80)  spatial step per sample [µm]
+%   'BeamWaistDiameter_um' (0.80) spatial step per sample [µm] (canonical)
+%   'Dot_um'               (0.80) legacy alias for BeamWaistDiameter_um
 %   'Model'        ([])    micronsToDegrees calibration model (reused/returned)
 %   'StartHold_s'  (0.002) seconds to hold initial point
 %   'EndHold_s'    (0.002) seconds to hold final point
@@ -16,6 +17,7 @@ function [stats, model] = playPreexistingPath(hX, hY, x_um, y_um, PDT_s, varargi
 %   'ParkWhenDone' (false) park both galvos after playback
 
 p = inputParser;
+p.addParameter('BeamWaistDiameter_um', [], @(x)isempty(x) || (isnumeric(x)&&x>0));
 p.addParameter('Dot_um',       0.80,  @(x)isnumeric(x)&&x>0);
 p.addParameter('Model',        [],    @(x)true);
 p.addParameter('StartHold_s',  0.002, @(x)isnumeric(x)&&x>=0);
@@ -24,7 +26,12 @@ p.addParameter('BeamHandle',   [],    @(x)isempty(x)||isobject(x));
 p.addParameter('PowerFrac',    [],    @(x)isempty(x)||(isscalar(x)&&x>=0&&x<=1));
 p.addParameter('ParkWhenDone', false, @(x)islogical(x)||ismember(x,[0 1]));
 p.parse(varargin{:});
-dot_um = p.Results.Dot_um; model = p.Results.Model;
+if ~isempty(p.Results.BeamWaistDiameter_um)
+    beamWaistDiameter_um = p.Results.BeamWaistDiameter_um;
+else
+    beamWaistDiameter_um = p.Results.Dot_um; % legacy alias path
+end
+model = p.Results.Model;
 tLead = p.Results.StartHold_s; tTail = p.Results.EndHold_s;
 bh = p.Results.BeamHandle; pf = p.Results.PowerFrac;
 doPark = logical(p.Results.ParkWhenDone);
@@ -39,7 +46,7 @@ x = x_um(:); y = y_um(:);
 dx = diff(x); dy = diff(y);
 s = [0; cumsum(hypot(dx,dy))];
 L = s(end); assert(L>0,'Zero-length path.');
-s_uniform = (0:dot_um:L).';
+s_uniform = (0:beamWaistDiameter_um:L).';
 if s_uniform(end) < L, s_uniform(end+1) = L; end
 x_u = interp1(s,x,s_uniform,'pchip');
 y_u = interp1(s,y,s_uniform,'pchip');
@@ -101,7 +108,7 @@ if doPark, try hX.park(); end; try hY.park(); end; end
 stats = struct('Fs_Hz',Fs, 'N',N, 'duration_s',N/Fs, ...
                'elapsed_s',elapsed_s, ...
                'totalLength_um',L, ...
-               'speed_um_s', dot_um / PDT_s);
+               'speed_um_s', beamWaistDiameter_um / PDT_s);
 end
 
 function cleanupDAQTask(tTask)

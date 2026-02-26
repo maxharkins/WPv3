@@ -39,7 +39,7 @@ function startScanMapping(hWP)
 
     % ---- playback parameters
     PDT_s = hWP.Settings.PixelDwellTime_ms / 1000;   % seconds
-    Dot   = hWP.Settings.BeamWaistDiameter_um;       % µm
+    beamWaistDiameter_um = hWP.Settings.BeamWaistDiameter_um; % µm
     leadS = 0.004;
     tailS = 0.002;
 
@@ -185,7 +185,7 @@ function startScanMapping(hWP)
 
             % ---- time estimate
             totalLength_um = sum(hypot(diff(x_um), diff(y_um)));
-            estimatedTime_s = (totalLength_um / Dot) * PDT_s + leadS + tailS;
+            estimatedTime_s = (totalLength_um / beamWaistDiameter_um) * PDT_s + leadS + tailS;
 
             fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s\n', ...
                     tileIdx, zIdx, zWorld, estimatedTime_s);
@@ -194,7 +194,7 @@ function startScanMapping(hWP)
             
             try
                 playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
-                    'Dot_um', Dot, ...
+                    'BeamWaistDiameter_um', beamWaistDiameter_um, ...
                     'BeamHandle', beam, ...
                     'PowerFrac', Pf, ...
                     'StartHold_s', leadS, ...
