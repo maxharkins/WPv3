@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# MATLAB autosave
+*.asv
+
+# MATLAB live editor temp
+*.mlx~
+
+# MATLAB project resources
+resources/
+
+# temporary data
+*.tif
+*.stl
+*.csv
+*.txt
+
+# build / export junk
+output.*
