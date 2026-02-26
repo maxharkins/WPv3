@@ -38,20 +38,19 @@ function data = applyScaleRotateAndCenter(data)
         sprintf([ ...
             '%s detected.\n\n' ...
             'Current longest dimension: %.3f microns (as imported).\n\n' ...
-            'If this is incorrect, enter the REAL longest dimension in microns.'], ...
+            'If this is incorrect, enter the REAL longest dimension (microns).'], ...
             label, longest), ...
-        'Correct longest dimension (microns):', ...
         'Optional: uniform scale factor (advanced):'
     };
 
-    answer = inputdlg(prompt, 'Confirm Scale', [4 60; 1 60; 1 60]);
+    answer = inputdlg(prompt, 'Confirm Scale', [1 60; 1 60]);
 
     if isempty(answer)
         error('Import cancelled by user.');
     end
 
-    targetLen   = str2double(answer{2});
-    manualScale = str2double(answer{3});
+    targetLen   = str2double(answer{1});
+    manualScale = str2double(answer{2});
 
     % ------------------------------------------------------------
     % Determine scale

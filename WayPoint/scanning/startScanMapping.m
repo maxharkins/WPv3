@@ -51,7 +51,7 @@ function startScanMapping(hWP)
 
     % ---- Z constraints
     zStep_um          = 0.01;     % quantization step
-    zMaxDeltaGuard   = 1200;     % absolute guardrail (µm)
+    zMaxDeltaGuard   = 800;     % absolute guardrail (µm)
     zArriveTol_um    = 0.05;     % arrival tolerance (µm)
 
     % ---- mask offset (single source of truth)
