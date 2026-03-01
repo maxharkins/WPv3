@@ -223,8 +223,9 @@ Recommended practice:
 
 ---
 
-# Planned Improvements (From Feb. 26, 2026)
+# Planned Improvements (From Mar. 1, 2026)
 
+- Include Z-dependent laser power tuning
 - Make scale/rotate/center callable at any time
 - Add persistent transform UI controls
 - Visualize all Z layer extrusions in 3D view
