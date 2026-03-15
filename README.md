@@ -32,6 +32,43 @@ Before launching WayPoint:
 
 ---
 
+# Environment Bootstrap
+
+WayPoint uses a two-layer environment bootstrap so `setScanimage(...)` is
+callable from any MATLAB session while keeping environment policy inside
+WPv3.
+
+- MATLAB user path is set to:
+
+      C:\Users\SCIENTIFICA\Documents\MATLAB
+
+- A lightweight wrapper lives there:
+
+      C:\Users\SCIENTIFICA\Documents\MATLAB\setScanimage.m
+
+- The wrapper adds WPv3 to path (if needed) and delegates to:
+
+      C:\Users\SCIENTIFICA\Documents\MaxHarkins\WPv3\WayPoint\app\helpers\SIEnv.m
+
+- `SIEnv.m` is the source of truth for environment switching logic.
+
+Wrapper behavior:
+
+    function setScanimage(varargin)
+        wpRoot = 'C:\Users\SCIENTIFICA\Documents\MaxHarkins\WPv3';
+        if ~contains(path, wpRoot)
+            addpath(genpath(wpRoot));
+        end
+        SIEnv(varargin{:});
+    end
+
+Typical use:
+
+    setScanimage("original")
+    setScanimage("harkins")
+
+---
+
 # Launch
 
 In MATLAB:
