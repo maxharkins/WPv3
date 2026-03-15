@@ -88,6 +88,7 @@ WayPoint automatically binds to:
 Supported formats:
 
 - `.stl` — triangulated surface mesh
+- `.gcode` / `.gco` / `.nc` — extrusion G-code converted to ScanPaths
 - `.txt`
   - 2 columns → treated as 2D mask (can be extruded before planning ScanPaths)
   - 3 columns → treated as 3D node volume
@@ -222,6 +223,13 @@ Image-based path generation defaults to 0.8 µm if unspecified.
 - 2 columns → promoted to 3D at current Z
 - 3 columns → treated as 3D volume
 - ScanPaths format → imported directly
+
+## G-code
+- Parses linear moves (`G0/G1`) with common unit/mode commands (`G20/G21`, `G90/G91`, `M82/M83`, `G92`)
+- Uses extrusion-positive moves as scan segments
+- Clips segments at each tile FOV boundary and preserves discontinuities
+- Tile spacing uses `FOV - 2*TileOverlap` and overlap regions are ownership-partitioned to avoid duplicate exposure
+- Current default assumes Cura-style scaled workflow: `G21` numeric values are interpreted as `µm` (mm-as-µm), not multiplied by 1000
 
 ---
 

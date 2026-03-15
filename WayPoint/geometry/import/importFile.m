@@ -129,6 +129,17 @@ function importFile(obj, filePath)
                     error('Unrecognized TXT data format.');
             end
 
+        case {'.gcode', '.gco', '.nc'}
+            obj.hStacks = Stacks(obj);
+            obj.hStacks.isMeshScan = 0;
+
+            coords_XYZ = obj.hStacks.importAndCenterGCode(filePath, obj);
+            if isempty(coords_XYZ)
+                warning('G-code file loaded but contained no extrusion coordinates.');
+            end
+
+            refreshPlot(obj);
+            return;
 
         otherwise
             error('Unsupported file type: %s', ext);

@@ -645,6 +645,124 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
         end
 
+        function coords_XYZ = importAndCenterGCode(obj, filename, app)
+        % importAndCenterGCode parses G-code extrusion moves and maps them
+        % into tile-local ScanPaths with FOV clipping and overlap-aware tiling.
+            if nargin < 3 || isempty(app)
+                app = obj.hWP;
+            end
+
+            g = parseGCodeFile(filename, 'AssumeMMIsMicrons', true);
+            segs = g.segments;
+            coords_XYZ = g.xyz;
+
+            if isempty(segs)
+                warning('No extrusion segments found in %s', filename);
+                obj.ScanPaths = {};
+                obj.ArbitraryZs = {};
+                return;
+            end
+
+            % Bounding-box center in XY; shift Z so min Z = 0.
+            xyMin = min(coords_XYZ(:,1:2), [], 1);
+            xyMax = max(coords_XYZ(:,1:2), [], 1);
+            xyCenter = (xyMin + xyMax) / 2;
+            coords_XYZ(:,1:2) = coords_XYZ(:,1:2) - xyCenter;
+            segs(:,[1 2 4 5]) = segs(:,[1 2 4 5]) - repmat([xyCenter xyCenter], size(segs,1), 1);
+
+            zMin = min(coords_XYZ(:,3));
+            coords_XYZ(:,3) = coords_XYZ(:,3) - zMin;
+            segs(:,[3 6]) = segs(:,[3 6]) - zMin;
+
+            qZ = app.Settings.QuantFactorZ_um;
+            if isempty(qZ) || ~isfinite(qZ) || qZ <= 0
+                qZ = 1;
+            end
+            segZ = round(segs(:,6) ./ qZ) .* qZ;
+            zLevels = unique(segZ, 'sorted');
+            zLevels = zLevels(:);
+
+            if isempty(zLevels)
+                warning('No valid Z levels detected in %s', filename);
+                obj.ScanPaths = {};
+                obj.ArbitraryZs = {};
+                return;
+            end
+
+            fovSize = app.Settings.FOVSize_um;
+            tileOverlap = app.Tile_Overlap_Edit_Field.Value;
+            tileSpacing = fovSize - 2 * tileOverlap;
+            if any(tileSpacing <= 0)
+                error('Tile overlap is too large. FOV - 2*overlap must be positive.');
+            end
+            if isscalar(tileSpacing)
+                tileSpacingXY = [tileSpacing tileSpacing];
+            else
+                tileSpacingXY = tileSpacing(:).';
+            end
+
+            stagePath = getStagePath(app, coords_XYZ, tileSpacing, 'ablation');
+            numTiles = size(stagePath, 1);
+            numZ = numel(zLevels);
+            halfFov = fovSize / 2;
+            ownerHalf = tileSpacingXY / 2;
+            tol = 1e-9;
+
+            scanPaths = cell(numTiles, 1);
+            allZs = cell(numTiles, 1);
+            for tileIdx = 1:numTiles
+                scanPaths{tileIdx} = cell(numZ, 1);
+                allZs{tileIdx} = zLevels;
+            end
+
+            for i = 1:size(segs,1)
+                zIdx = find(abs(zLevels - segZ(i)) <= max(1e-9, qZ*0.5), 1, 'first');
+                if isempty(zIdx)
+                    continue;
+                end
+
+                p0 = segs(i,1:2);
+                p1 = segs(i,4:5);
+
+                for tileIdx = 1:numTiles
+                    cxy = stagePath(tileIdx,1:2);
+                    fovRect = [cxy(1)-halfFov, cxy(1)+halfFov, cxy(2)-halfFov, cxy(2)+halfFov];
+
+                    % Ownership rectangle avoids duplicate exposure in overlap.
+                    if numTiles == 1
+                        ownerRect = fovRect;
+                    else
+                        ownerRect = [ ...
+                            cxy(1)-ownerHalf(1), cxy(1)+ownerHalf(1), ...
+                            cxy(2)-ownerHalf(2), cxy(2)+ownerHalf(2)];
+                    end
+
+                    assignRect = intersectRects(fovRect, ownerRect);
+                    [tf, q0, q1] = clipSegmentToRect(p0, p1, assignRect);
+                    if ~tf
+                        continue;
+                    end
+
+                    local0 = q0 - cxy;
+                    local1 = q1 - cxy;
+                    scanPaths{tileIdx}{zIdx} = appendSegmentWithBreak(scanPaths{tileIdx}{zIdx}, local0, local1, tol);
+                end
+            end
+
+            obj.ScanPaths = scanPaths;
+            obj.ArbitraryZs = allZs;
+            obj.StagePath = stagePath;
+
+            if ~isempty(app.aPath)
+                app.aPath.Coordinates = stagePath;
+            end
+
+            obj.hWP.hMask.hNodes.BasePoints = coords_XYZ;
+            obj.hWP.hMask.hNodes.TransformedPoints = coords_XYZ;
+
+            fprintf('G-code loaded and converted to ScanPaths from %s\n', filename);
+        end
+
         function obj = PopulatePowerBoxes(obj, app)
             stagePath   = obj.StagePath(:,1:2);
             nodes       = app.hMask.hNodes.TransformedPoints;
@@ -714,4 +832,91 @@ classdef Stacks < handle & matlab.mixin.SetGet
             end
         end
     end
+end
+
+function path = appendSegmentWithBreak(path, p0, p1, tol)
+    if nargin < 4
+        tol = 1e-9;
+    end
+
+    if norm(p1 - p0) <= tol
+        return;
+    end
+
+    if isempty(path)
+        path = [p0; p1];
+        return;
+    end
+
+    validRows = ~any(isnan(path), 2);
+    lastIdx = find(validRows, 1, 'last');
+    if isempty(lastIdx)
+        path = [p0; p1];
+        return;
+    end
+
+    lastPt = path(lastIdx, :);
+    if norm(lastPt - p0) <= tol
+        if norm(lastPt - p1) > tol
+            path = [path; p1];
+        end
+    else
+        path = [path; nan nan; p0; p1];
+    end
+end
+
+function [tf, q0, q1] = clipSegmentToRect(p0, p1, rect)
+% rect = [xmin xmax ymin ymax]
+    xmin = rect(1);
+    xmax = rect(2);
+    ymin = rect(3);
+    ymax = rect(4);
+
+    if xmin > xmax || ymin > ymax
+        tf = false;
+        q0 = [nan nan];
+        q1 = [nan nan];
+        return;
+    end
+
+    dx = p1(1) - p0(1);
+    dy = p1(2) - p0(2);
+
+    p = [-dx, dx, -dy, dy];
+    q = [p0(1)-xmin, xmax-p0(1), p0(2)-ymin, ymax-p0(2)];
+
+    t0 = 0;
+    t1 = 1;
+
+    for k = 1:4
+        if abs(p(k)) < eps
+            if q(k) < 0
+                tf = false;
+                q0 = [nan nan];
+                q1 = [nan nan];
+                return;
+            end
+        else
+            r = q(k) / p(k);
+            if p(k) < 0
+                t0 = max(t0, r);
+            else
+                t1 = min(t1, r);
+            end
+            if t0 > t1
+                tf = false;
+                q0 = [nan nan];
+                q1 = [nan nan];
+                return;
+            end
+        end
+    end
+
+    q0 = p0 + t0 * [dx dy];
+    q1 = p0 + t1 * [dx dy];
+    tf = true;
+end
+
+function rectOut = intersectRects(a, b)
+    rectOut = [max(a(1), b(1)), min(a(2), b(2)), max(a(3), b(3)), min(a(4), b(4))];
 end

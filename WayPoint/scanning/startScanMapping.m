@@ -167,42 +167,55 @@ function startScanMapping(hWP)
             end
 
             % ---- XY path (translate AFTER Z success)
-            scanPathXY = tilePaths{zIdx};
-            scanPathXY = unique(scanPathXY, 'rows', 'stable');
-
-            if size(scanPathXY,1) < 2
+            rawPathXY = tilePaths{zIdx};
+            subPaths = splitPathByNaN(rawPathXY);
+            if isempty(subPaths)
                 fprintf('Tile %d Z %d: path too short, skipping.\n', tileIdx, zIdx);
                 continue;
             end
 
-            x_um = scanPathXY(:,1);
-            y_um = scanPathXY(:,2);
+            totalLength_um = 0;
+            for pIdx = 1:numel(subPaths)
+                sp = unique(subPaths{pIdx}, 'rows', 'stable');
+                if size(sp,1) < 2
+                    continue;
+                end
+                subPaths{pIdx} = sp;
+                totalLength_um = totalLength_um + sum(hypot(diff(sp(:,1)), diff(sp(:,2))));
+            end
 
-            % ---- bounds safety
-            assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
-                'Path exceeds ±500 µm bounds.');
-
-            % ---- time estimate
-            totalLength_um = sum(hypot(diff(x_um), diff(y_um)));
-            estimatedTime_s = (totalLength_um / beamWaistDiameter_um) * PDT_s + leadS + tailS;
-
+            estimatedTime_s = (totalLength_um / beamWaistDiameter_um) * PDT_s + numel(subPaths) * (leadS + tailS);
             fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s\n', ...
                     tileIdx, zIdx, zWorld, estimatedTime_s);
 
-            % ---- execute scan
             fprintf("\nPDT (ms): %.6f\n", PDT_s*1E3)
             fprintf("Pf (0-1): %.2f\n\n", Pf)
-            try
-                playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
-                    'BeamWaistDiameter_um', beamWaistDiameter_um, ...
-                    'BeamHandle', beam, ...
-                    'PowerFrac', Pf, ...
-                    'StartHold_s', leadS, ...
-                    'EndHold_s', tailS, ...
-                    'ParkWhenDone', false);
-            catch ME
-                warning('Scan failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
-                continue;
+
+            for pIdx = 1:numel(subPaths)
+                sp = subPaths{pIdx};
+                if size(sp,1) < 2
+                    continue;
+                end
+
+                x_um = sp(:,1);
+                y_um = sp(:,2);
+
+                % ---- bounds safety
+                assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
+                    'Path exceeds ±500 µm bounds.');
+
+                try
+                    playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
+                        'BeamWaistDiameter_um', beamWaistDiameter_um, ...
+                        'BeamHandle', beam, ...
+                        'PowerFrac', Pf, ...
+                        'StartHold_s', leadS, ...
+                        'EndHold_s', tailS, ...
+                        'ParkWhenDone', false);
+                catch ME
+                    warning('Scan failed (Tile %d Z %d part %d): %s', tileIdx, zIdx, pIdx, ME.message);
+                    continue;
+                end
             end
             
             drawnow % make sure pause updates
@@ -225,6 +238,34 @@ function startScanMapping(hWP)
     end % Double counting tranlated positions with .txt files (at least known for scanpaths on Feb 22, 2026)
 
     disp('DONE!');
+end
+
+function parts = splitPathByNaN(pathXY)
+    parts = {};
+    if isempty(pathXY) || size(pathXY,2) < 2
+        return;
+    end
+
+    isBreak = any(isnan(pathXY), 2);
+    startIdx = 1;
+    for i = 1:size(pathXY,1)
+        if isBreak(i)
+            if i-1 >= startIdx
+                seg = pathXY(startIdx:i-1, :);
+                if size(seg,1) >= 2
+                    parts{end+1,1} = seg; %#ok<AGROW>
+                end
+            end
+            startIdx = i + 1;
+        end
+    end
+
+    if startIdx <= size(pathXY,1)
+        seg = pathXY(startIdx:end, :);
+        if size(seg,1) >= 2
+            parts{end+1,1} = seg; %#ok<AGROW>
+        end
+    end
 end
 
 
