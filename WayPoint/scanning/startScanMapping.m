@@ -145,6 +145,7 @@ function startScanMapping(hWP)
                 hWP.hSI.hMotors.moveSample([0 0 zWorld]);
                 try % plot on the figure
                     plot(x_um, y_um, '-')
+                    xlim([-500,500]),ylim([-500,500])
                     axis equal
                 catch
                     % do nothing
@@ -177,8 +178,6 @@ function startScanMapping(hWP)
             x_um = scanPathXY(:,1);
             y_um = scanPathXY(:,2);
 
-            plot(x_um, y_um,'-k')
-
             % ---- bounds safety
             assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
                 'Path exceeds ±500 µm bounds.');
@@ -191,7 +190,8 @@ function startScanMapping(hWP)
                     tileIdx, zIdx, zWorld, estimatedTime_s);
 
             % ---- execute scan
-            
+            fprintf("\nPDT (ms): %.6f\n", PDT_s*1E3)
+            fprintf("Pf (0-1): %.2f\n\n", Pf)
             try
                 playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
                     'BeamWaistDiameter_um', beamWaistDiameter_um, ...
