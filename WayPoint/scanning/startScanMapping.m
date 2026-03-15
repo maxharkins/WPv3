@@ -146,6 +146,7 @@ function startScanMapping(hWP)
                 try % plot on the figure
                     plot(x_um, y_um, '-')
                     xlim([-500,500]),ylim([-500,500])
+                    xlabel('x (μm)'),ylabel('y (μm)')
                     axis equal
                 catch
                     % do nothing
@@ -190,8 +191,6 @@ function startScanMapping(hWP)
                     tileIdx, zIdx, zWorld, estimatedTime_s);
 
             % ---- execute scan
-            fprintf("\nPDT (ms): %.6f\n", PDT_s*1E3)
-            fprintf("Pf (0-1): %.2f\n\n", Pf)
             try
                 playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
                     'BeamWaistDiameter_um', beamWaistDiameter_um, ...
@@ -223,8 +222,6 @@ function startScanMapping(hWP)
             % end
         end
     end % Double counting tranlated positions with .txt files (at least known for scanpaths on Feb 22, 2026)
-
-    disp('DONE!');
 end
 
 
