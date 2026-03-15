@@ -1,4 +1,4 @@
-function setScanimage(workspaceName)
+function SIEnv(workspaceName)
 %SETSCANIMAGE Configure MATLAB paths for ScanImage + WPv3 development.
 %
 % This is an environment bootstrap function that switches MATLAB between:
