@@ -4,7 +4,13 @@ function importFile(obj, filePath)
     % Select file
     % ------------------------------------------------------------
     if nargin < 2
-        filePath = browse();
+        startDir = resolveDefaultImportDir();
+        [file, path] = uigetfile(fullfile(startDir, '*.*'), 'Select import file');
+        if isequal(file, 0)
+            filePath = [];
+        else
+            filePath = fullfile(path, file);
+        end
     end
     
     if isempty(filePath)
@@ -132,4 +138,80 @@ function importFile(obj, filePath)
     % UI refresh
     % ------------------------------------------------------------
     refreshPlot(obj);
+end
+
+function startDir = resolveDefaultImportDir()
+% Prefer known Box import roots across macOS and workstation Windows.
+    macTailPrimary = {'Zhang&Brown', 'Scan Objects'};
+    macTailAlt     = {'Zhang&Brown', 'ScanObjects'};
+    winTailPrimary = {'Zhang&Brown'};
+    winTailAlt1    = {'Zhang&Brown', 'Scan Objects'};
+    winTailAlt2    = {'Zhang&Brown', 'ScanObjects'};
+    homeDir = char(java.lang.System.getProperty('user.home'));
+
+    % First, walk up from cwd and use the first Box* ancestor.
+    cursor = pwd;
+    while true
+        [parent, name] = fileparts(cursor);
+        if startsWith(name, 'Box')
+            candidates = {
+                fullfile(cursor, macTailPrimary{:})
+                fullfile(cursor, macTailAlt{:})
+                fullfile(cursor, winTailPrimary{:})
+                fullfile(cursor, winTailAlt1{:})
+                fullfile(cursor, winTailAlt2{:})
+            };
+            for k = 1:numel(candidates)
+                if isfolder(candidates{k})
+                    startDir = candidates{k};
+                    return;
+                end
+            end
+        end
+
+        if isempty(parent) || strcmp(parent, cursor)
+            break;
+        end
+        cursor = parent;
+    end
+
+    searchPaths = {
+        fullfile(homeDir, 'Library', 'CloudStorage', 'Box-Box', macTailPrimary{:})
+        fullfile(homeDir, 'Library', 'CloudStorage', 'Box-Box', macTailAlt{:})
+        fullfile(homeDir, 'Library', 'CloudStorage', 'Box', macTailPrimary{:})
+        fullfile(homeDir, 'Library', 'CloudStorage', 'Box', macTailAlt{:})
+        fullfile(homeDir, 'Box', macTailPrimary{:})
+        fullfile(homeDir, 'Box', macTailAlt{:})
+    };
+
+    if ispc
+        userProfile = getenv('USERPROFILE');
+        if ~isempty(userProfile)
+            searchPaths = [searchPaths; { ...
+                fullfile(userProfile, 'Box', winTailPrimary{:}); ...
+                fullfile(userProfile, 'Box', winTailAlt1{:}); ...
+                fullfile(userProfile, 'Box', winTailAlt2{:}); ...
+                fullfile(userProfile, 'Box-Box', winTailPrimary{:}); ...
+                fullfile(userProfile, 'Box-Box', winTailAlt1{:}); ...
+                fullfile(userProfile, 'Box-Box', winTailAlt2{:}) ...
+            }]; %#ok<AGROW>
+        end
+
+        % Explicit workstation path.
+        searchPaths = [searchPaths; { ...
+            fullfile('C:\Users\SCIENTIFICA\Box', winTailPrimary{:}); ...
+            fullfile('C:\Users\SCIENTIFICA\Box', winTailAlt1{:}); ...
+            fullfile('C:\Users\SCIENTIFICA\Box', winTailAlt2{:}) ...
+        }]; %#ok<AGROW>
+    end
+
+    for i = 1:numel(searchPaths)
+        candidate = searchPaths{i};
+        if isfolder(candidate)
+            startDir = candidate;
+            return;
+        end
+    end
+
+    startDir = pwd;
 end
