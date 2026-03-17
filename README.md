@@ -94,6 +94,71 @@ WayPoint automatically binds to:
 
 ---
 
+# Fast Z API (No New Serial Connection)
+
+WPv3 now includes a Z-only motion API that reuses existing ScanImage objects
+(`hSI` / `hSICtl`) and does not open a second serial connection:
+
+- API file: `WayPoint/movement/zfast/moveZaxis_fast.m`
+- API docs: `WayPoint/movement/zfast/README.md`
+- Optional helpers:
+  - `WayPoint/movement/zfast/getZaxis_fast.m`
+  - `WayPoint/movement/zfast/waitZaxis_fast.m`
+
+Function signature:
+
+    out = moveZaxis_fast(hSI_or_hSICtl, zValue, ...
+        'Type', 'relative|absolute', ...
+        'Frame', 'sample|axes', ...
+        'QueryBefore', false, ...
+        'QueryAfter', false, ...
+        'Blocking', true, ...
+        'PollInterval', 0.005, ...
+        'Timeout', 5)
+
+Coordinate frames:
+
+- `Frame='sample'`: reads/writes sample-space Z (`hSI.hMotors.samplePosition(3)`)
+- `Frame='axes'`: reads/writes controller-axis Z (`hSI.hMotors.axesPosition(3)`)
+
+Type semantics:
+
+- `Type='relative'`: target = current Z + `zValue`
+- `Type='absolute'`: target = `zValue`
+
+WPv3 integration:
+
+- The app exposes a thin forwarder method:
+
+      out = app.moveZFast(zValue, varargin{:})
+
+- `app.moveZFast(...)` forwards to `moveZaxis_fast(app.hSICtl, ...)` when
+  available, otherwise `moveZaxis_fast(app.hSI, ...)`.
+
+Exact call example:
+
+    out = moveZaxis_fast(hSI, 100.00, ...
+        'Type','relative', ...
+        'QueryBefore',false, ...
+        'QueryAfter',true);
+
+Minimal validation:
+
+    z0 = hSI.hMotors.samplePosition(3);
+
+    out1 = moveZaxis_fast(hSI, 200, 'Type','relative', 'Frame','sample', 'QueryAfter',true);
+    out2 = moveZaxis_fast(hSI, z0, 'Type','absolute', 'Frame','sample', 'QueryAfter',true);
+
+    disp(out1)
+    disp(out2)
+
+Expected:
+
+- `out1.deltaActual` close to `+200`
+- `out2.zAfter` close to `z0`
+
+---
+
 # Standard Workflow
 
 ## 1. Import Geometry or Paths
