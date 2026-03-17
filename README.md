@@ -94,6 +94,45 @@ WayPoint automatically binds to:
 
 ---
 
+# Fast Z API (Single Motion Path)
+
+WPv3 includes a Z-only API that uses existing ScanImage handles and does not
+open a second serial connection:
+
+- `WayPoint/movement/zfast/moveZaxis_fast.m`
+- `WayPoint/movement/zfast/getZaxis_fast.m`
+- `WayPoint/movement/zfast/waitZaxis_fast.m`
+
+Signature:
+
+    out = moveZaxis_fast(hSI_or_hSICtl, zValue, ...
+        'Type', 'relative|absolute', ...
+        'Frame', 'sample|axes', ...
+        'QueryBefore', false, ...
+        'QueryAfter', false, ...
+        'Blocking', true, ...
+        'PollInterval', 0.005, ...
+        'Timeout', 5)
+
+Integration notes:
+
+- No `WP.mlapp` edits are required.
+- Stage/manual moves and scanning both call `moveZaxis_fast(...)`.
+- `hWP.hStage.Position(3)` is synchronized from measured/tracked Z so GUI state,
+  imported 2D mask promotion Z, and scan execution stay consistent.
+- Fast no-op path: for WP-wrapper calls in sample frame, if
+  `hWP.hStage.Position(3)` already matches target and query flags are false,
+  move command is skipped.
+
+Exact call:
+
+    out = moveZaxis_fast(hSI, 100.00, ...
+        'Type','relative', ...
+        'QueryBefore',false, ...
+        'QueryAfter',true);
+
+---
+
 # Standard Workflow
 
 ## 1. Import Geometry or Paths

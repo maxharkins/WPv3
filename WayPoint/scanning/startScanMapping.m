@@ -82,8 +82,9 @@ function startScanMapping(hWP)
         % ---- Z tracking + one-time startup safety anchor
         maskZOffset_um = hWP.hMask.Position(3);
         try
-            waitZaxis_fast(hWP.hSI, 'PollInterval', zMovePoll_s, 'Timeout', zMoveTimeout_s);
-            zTracked_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+            waitZaxis_fast(hWP, 'PollInterval', zMovePoll_s, 'Timeout', zMoveTimeout_s);
+            zTracked_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
+            syncStageZState(hWP, zTracked_um);
         catch ME
             error('Failed to initialize Z safety anchor: %s', ME.message);
         end
@@ -168,7 +169,7 @@ function startScanMapping(hWP)
         if ~isempty(firstLayerIdx)
             zFirstTileWorld = zLevels(firstLayerIdx) + maskZOffset_um;
             try
-                zAnchor_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+                zAnchor_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
             catch ME
                 warning('Tile %d first-layer safety query failed: %s', tileIdx, ME.message);
                 runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
@@ -187,6 +188,7 @@ function startScanMapping(hWP)
                     sprintf('Resynced tracked Z by %.3f um (tracked %.3f -> queried %.3f).', drift, zTracked_um, zAnchor_um)); %#ok<AGROW>
             end
             zTracked_um = zAnchor_um;
+            syncStageZState(hWP, zTracked_um);
 
             zDeltaFirst = abs(zTracked_um - zFirstTileWorld);
             if zDeltaFirst >= zMaxDeltaGuard
@@ -236,7 +238,7 @@ function startScanMapping(hWP)
             moveStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             tic
             try
-                moveZaxis_fast(hWP.hSI, zWorld, ...
+                outZ = moveZaxis_fast(hWP, zWorld, ...
                     'Type', 'absolute', ...
                     'Frame', 'sample', ...
                     'QueryBefore', false, ...
@@ -244,7 +246,12 @@ function startScanMapping(hWP)
                     'Blocking', true, ...
                     'PollInterval', zMovePoll_s, ...
                     'Timeout', zMoveTimeout_s);
-                zTracked_um = zWorld;
+                if isfield(outZ, 'zAfter') && isfinite(outZ.zAfter)
+                    zTracked_um = outZ.zAfter;
+                else
+                    zTracked_um = zWorld;
+                end
+                syncStageZState(hWP, zTracked_um);
             catch ME
                 warning('Z move failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 moveErr = string(ME.message);
@@ -256,9 +263,10 @@ function startScanMapping(hWP)
 
             if ~isempty(firstLayerIdx) && zIdx == firstLayerIdx
                 try
-                    zAnchorAfter_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+                    zAnchorAfter_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
                     zArrivalErr = abs(zAnchorAfter_um - zWorld);
                     zTracked_um = zAnchorAfter_um;
+                    syncStageZState(hWP, zTracked_um);
                     if zArrivalErr > zArriveTol_um
                         warning('Tile %d first-layer Z arrival off: got %.3f µm, wanted %.3f µm', ...
                             tileIdx, zAnchorAfter_um, zWorld);
@@ -562,6 +570,21 @@ function p = safeGetMaskPos(hWP)
     try
         p = hWP.hMask.Position;
     catch
+    end
+end
+
+function syncStageZState(hWP, z_um)
+    try
+        if ~isprop(hWP, 'hStage') || isempty(hWP.hStage)
+            return;
+        end
+        pos = hWP.hStage.Position;
+        if isnumeric(pos) && numel(pos) >= 3 && isfinite(z_um)
+            pos(3) = double(z_um);
+            hWP.hStage.Position = pos;
+        end
+    catch
+        % Non-fatal for scan execution.
     end
 end
 

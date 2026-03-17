@@ -36,6 +36,14 @@ function initializeApp(hWP)
     
     hWP.hSI = evalin('base', 'hSI');
     hWP.hSICtl = evalin('base', 'hSICtl');
+    try
+        zNow = double(hWP.hSI.hMotors.samplePosition(3));
+        if isfinite(zNow)
+            hWP.hStage.Position(3) = zNow;
+        end
+    catch
+        % Leave default stage Z at 0 if ScanImage motor query is unavailable.
+    end
 
     hWP.serialPort.address = 'COM5';
     hWP.serialPort.baudRate = 9600;

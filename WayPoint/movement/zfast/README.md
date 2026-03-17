@@ -2,6 +2,12 @@
 
 This module provides a Z-only motion API that reuses existing ScanImage objects (`hSI` / `hSICtl`) and does not open a second serial connection.
 
+## WPv3 Integration (No `WP.mlapp` edits)
+
+- WPv3 movement/scanning code calls `moveZaxis_fast(...)` directly.
+- `hWP.hStage.Position(3)` is synchronized from measured/tracked Z during stage moves and scan execution.
+- This keeps app state consistent without adding methods to `WP.mlapp`.
+
 ## Sample vs Axes
 
 - `Frame='sample'`: Uses ScanImage sample-space coordinates (`hSI.hMotors.samplePosition(3)`), i.e. relative/sample coordinates.
@@ -22,7 +28,7 @@ out = moveZaxis_fast(hSI_or_hSICtl, zValue, ...
 
 ## Options and Defaults
 
-- `Type` (default: `'absolute'`)
+- `Type` (default: `'relative'`)
 - `Frame` (default: `'sample'`)
 - `QueryBefore` (default: `false`)
 - `QueryAfter` (default: `false`)
@@ -38,6 +44,9 @@ Behavior:
 - `QueryAfter=true`: forces `hMotors.queryPosition([false false true], true)` before reading `zAfter`
 - `Blocking=true`: waits for move completion by polling `queryMoving()`
 - `Blocking=false`: sends move command and returns immediately
+- Fast no-op optimization: when input is a WP-style wrapper with
+  `hStage.Position(3)`, `Frame='sample'`, and target equals cached stage Z,
+  the function returns immediately (no move command) when both query flags are false.
 
 ## Copy/Paste Examples
 
