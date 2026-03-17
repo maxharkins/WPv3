@@ -31,9 +31,7 @@ function PockelsCalibration = pockelsCellPowerCalibration(hSI, varargin)
 parser = inputParser;
 parser.addRequired('hSI');
 parser.addParameter('MeasureFcn', []);
-% parser.addParameter('PFSamples', [0.00 0.15 0.30 0.45 0.60 0.75 0.90 1.00], ...
-%     @(x) isnumeric(x) && isvector(x));
-parser.addParameter('PFSamples', [0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00], ...
+parser.addParameter('PFSamples', [0.00 0.15 0.30 0.45 0.60 0.75 0.90 1.00], ...
     @(x) isnumeric(x) && isvector(x));
 parser.addParameter('SettleTime', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 parser.addParameter('SavePath', '', ...
@@ -341,7 +339,7 @@ end
 end
 
 function setPowerFractionSafe(hSI, pf)
-%hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
+hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
 end
 
 function [outDir, baseStem] = resolveOutputPath(savePathOpt, saveDirOpt)
