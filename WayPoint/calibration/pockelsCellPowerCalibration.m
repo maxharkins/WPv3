@@ -107,12 +107,13 @@ end
 
 x = pf_samples * 100;
 y = power_measured;
-model = @(p, xData) p(1) .* sin(p(2) .* xData + p(3)) + p(4);
+model = @(p, xData) p(1) .* sin(p(2) .* xData + p(3)).^2 + p(4);
 
-A0 = -(max(y) - min(y)) / 2;
-D0 = (max(y) + min(y)) / 2;
-omega0 = pi / 100;
+A0 = max(y) - min(y);   % full amplitude
+D0 = min(y);            % baseline (near 0)
+omega0 = pi / 100;      % fine for now
 phi0 = 0;
+
 p0 = [A0 omega0 phi0 D0];
 
 try
