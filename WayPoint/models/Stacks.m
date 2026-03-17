@@ -58,7 +58,8 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % Redo the slice triangulation to scan paths since its pretty
             % fast and we want to make the z step size is still used.
             cfg = struct();
-            cfg.xySpacing = app.Settings.BeamWaistDiameter_um;  % µm
+            rasterSpacing_um = wpRasterSpacingFromBeamWaist(app.Settings.BeamWaistDiameter_um);
+            cfg.xySpacing = rasterSpacing_um;                   % µm
             cfg.zStep     = app.Settings.QuantFactorZ_um;       % µm
             cfg.verbose   = true;
 
@@ -68,8 +69,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
             %app.hStacks = Stacks(app, true);
             
-            qXY    = app.Settings.QuantFactorXY_um;
-        
             numZ = numel(layers);
         
             % Build as {numZ x 1} for this single mesh "tile"
@@ -90,7 +89,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     zLevels(zIdx) = (zIdx-1) * app.Settings.QuantFactorZ_um;
                 end
         
-                segs = contoursToScanSegments(contours, qXY);
+                segs = contoursToScanSegments(contours, rasterSpacing_um);
         
                 if isempty(segs)
                     scanPath{zIdx} = [];
@@ -261,7 +260,8 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     % Build layered scan paths directly
                     % ------------------------------------------------------------
                     cfg = struct();
-                    cfg.xySpacing = app.Settings.BeamWaistDiameter_um;  % µm
+                    rasterSpacing_um = wpRasterSpacingFromBeamWaist(app.Settings.BeamWaistDiameter_um);
+                    cfg.xySpacing = rasterSpacing_um;                   % µm
                     cfg.zStep     = app.Settings.QuantFactorZ_um;       % µm
                     cfg.verbose   = true;
                 
@@ -284,7 +284,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % Lazily build PowerBoxes
             obj = obj.PopulatePowerBoxes(app);
         
-            stageSize_um          = getFOVfromZoom(app.Zoom_Factor_Spinner.Value);
+            stageSize_um          = zoom2microns(app.Zoom_Factor_Spinner.Value);
             beamWaistDiameter_um = app.Settings.BeamWaistDiameter_um;
         
             numTiles = numel(obj.PowerBoxes);
@@ -669,6 +669,10 @@ classdef Stacks < handle & matlab.mixin.SetGet
             xyCenter = (xyMin + xyMax) / 2;
             coords_XYZ(:,1:2) = coords_XYZ(:,1:2) - xyCenter;
             segs(:,[1 2 4 5]) = segs(:,[1 2 4 5]) - repmat([xyCenter xyCenter], size(segs,1), 1);
+
+            % G-code Z convention is opposite microscopy Z convention.
+            coords_XYZ(:,3) = -coords_XYZ(:,3);
+            segs(:,[3 6]) = -segs(:,[3 6]);
 
             zMin = min(coords_XYZ(:,3));
             coords_XYZ(:,3) = coords_XYZ(:,3) - zMin;

@@ -17,6 +17,14 @@ function importFile(obj, filePath)
         return;
     end
 
+    % Keep source file context for export naming + metadata logging.
+    try
+        src = wpRememberImportedFile(obj, filePath);
+        obj.Settings.ImportedFilePath = src.path;
+        obj.Settings.ImportedFileLabel = src.label;
+    catch
+    end
+
     wellCentroid = [0 0 0];   % Well coordinate frame origin
     [~,~,ext] = fileparts(filePath);
     ext = lower(ext);
@@ -45,7 +53,7 @@ function importFile(obj, filePath)
             % Build layered scan paths directly
             % ------------------------------------------------------------
             cfg = struct();
-            cfg.xySpacing = obj.Settings.BeamWaistDiameter_um;  % µm
+            cfg.xySpacing = wpRasterSpacingFromBeamWaist(obj.Settings.BeamWaistDiameter_um);  % µm
             cfg.zStep     = obj.Settings.QuantFactorZ_um;       % µm
             cfg.verbose   = true;
         
@@ -152,75 +160,19 @@ function importFile(obj, filePath)
 end
 
 function startDir = resolveDefaultImportDir()
-% Prefer known Box import roots across macOS and workstation Windows.
-    macTailPrimary = {'Zhang&Brown', 'Scan Objects'};
-    macTailAlt     = {'Zhang&Brown', 'ScanObjects'};
-    winTailPrimary = {'Zhang&Brown'};
-    winTailAlt1    = {'Zhang&Brown', 'Scan Objects'};
-    winTailAlt2    = {'Zhang&Brown', 'ScanObjects'};
-    homeDir = char(java.lang.System.getProperty('user.home'));
-
-    % First, walk up from cwd and use the first Box* ancestor.
-    cursor = pwd;
-    while true
-        [parent, name] = fileparts(cursor);
-        if startsWith(name, 'Box')
-            candidates = {
-                fullfile(cursor, macTailPrimary{:})
-                fullfile(cursor, macTailAlt{:})
-                fullfile(cursor, winTailPrimary{:})
-                fullfile(cursor, winTailAlt1{:})
-                fullfile(cursor, winTailAlt2{:})
-            };
-            for k = 1:numel(candidates)
-                if isfolder(candidates{k})
-                    startDir = candidates{k};
-                    return;
-                end
+% Prefer known Zhang&Brown import roots inside Box.
+    zhangBrownDir = wpFindZhangBrownFolder('StartDir', pwd);
+    if ~isempty(zhangBrownDir)
+        candidates = {
+            fullfile(zhangBrownDir, 'Scan Objects')
+            fullfile(zhangBrownDir, 'ScanObjects')
+            zhangBrownDir
+        };
+        for i = 1:numel(candidates)
+            if isfolder(candidates{i})
+                startDir = candidates{i};
+                return;
             end
-        end
-
-        if isempty(parent) || strcmp(parent, cursor)
-            break;
-        end
-        cursor = parent;
-    end
-
-    searchPaths = {
-        fullfile(homeDir, 'Library', 'CloudStorage', 'Box-Box', macTailPrimary{:})
-        fullfile(homeDir, 'Library', 'CloudStorage', 'Box-Box', macTailAlt{:})
-        fullfile(homeDir, 'Library', 'CloudStorage', 'Box', macTailPrimary{:})
-        fullfile(homeDir, 'Library', 'CloudStorage', 'Box', macTailAlt{:})
-        fullfile(homeDir, 'Box', macTailPrimary{:})
-        fullfile(homeDir, 'Box', macTailAlt{:})
-    };
-
-    if ispc
-        userProfile = getenv('USERPROFILE');
-        if ~isempty(userProfile)
-            searchPaths = [searchPaths; { ...
-                fullfile(userProfile, 'Box', winTailPrimary{:}); ...
-                fullfile(userProfile, 'Box', winTailAlt1{:}); ...
-                fullfile(userProfile, 'Box', winTailAlt2{:}); ...
-                fullfile(userProfile, 'Box-Box', winTailPrimary{:}); ...
-                fullfile(userProfile, 'Box-Box', winTailAlt1{:}); ...
-                fullfile(userProfile, 'Box-Box', winTailAlt2{:}) ...
-            }]; %#ok<AGROW>
-        end
-
-        % Explicit workstation path.
-        searchPaths = [searchPaths; { ...
-            fullfile('C:\Users\SCIENTIFICA\Box', winTailPrimary{:}); ...
-            fullfile('C:\Users\SCIENTIFICA\Box', winTailAlt1{:}); ...
-            fullfile('C:\Users\SCIENTIFICA\Box', winTailAlt2{:}) ...
-        }]; %#ok<AGROW>
-    end
-
-    for i = 1:numel(searchPaths)
-        candidate = searchPaths{i};
-        if isfolder(candidate)
-            startDir = candidate;
-            return;
         end
     end
 

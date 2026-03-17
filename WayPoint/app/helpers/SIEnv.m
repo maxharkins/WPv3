@@ -48,6 +48,14 @@ switch lower(string(workspaceName))
         % Remove ScanImage install tree from path to avoid function conflicts.
         rmpath(genpath(scanImageRoot));
 
+        % Ensure today's experiment folder tree exists for logging/export.
+        try
+            ctx = wpEnsureDailyExperimentFolder('Create', true);
+            fprintf('[SIEnv] Daily experiment folder ready: %s\n', ctx.dayDir);
+        catch ME
+            warning('[SIEnv] Could not prepare daily experiment folder: %s', ME.message);
+        end
+
     otherwise
         error('setScanimage:InvalidWorkspace', ...
             'Unknown workspace "%s". Use "original" or "harkins".', workspaceName);

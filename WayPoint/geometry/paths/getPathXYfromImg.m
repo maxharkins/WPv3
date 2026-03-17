@@ -1,15 +1,16 @@
 function [pathXY] = getPathXYfromImg(img, stageSize, beamWaistDiameter_um)
     if nargin < 3 || isempty(beamWaistDiameter_um)
-        beamWaistDiameter_um = 0.8; % microns (diameter spacing)
+        beamWaistDiameter_um = 0.8; % microns (beam waist diameter)
     end
     if nargin < 2 || isempty(stageSize)
         stageSize = round(size(img,1));
     end
 
     stageSize = round(stageSize(1));
+    rasterSpacing_um = wpRasterSpacingFromBeamWaist(beamWaistDiameter_um);
 
     imgRes = size(img,1) / stageSize;
-    desRes = 1/beamWaistDiameter_um;
+    desRes = 1/rasterSpacing_um;
 
     % scale img
     img = rot90(img,1);
@@ -93,7 +94,7 @@ function [pathXY] = getPathXYfromImg(img, stageSize, beamWaistDiameter_um)
             pathXY = [pathXY; ep_R_CURR; ep_L_CURR];
         end
     end
-    pathXY = pathXY * beamWaistDiameter_um;
+    pathXY = pathXY * rasterSpacing_um;
 
 end
 

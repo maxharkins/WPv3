@@ -1,13 +1,13 @@
 function [stats, model] = playPreexistingPath(hX, hY, x_um, y_um, PDT_s, varargin)
 % Play a pre-existing XY path (µm) at constant tangential velocity.
-% Resamples to 0.80 µm spacing and plays at Fs = 1/PDT_s with one 2-ch NI task.
+% Resamples to BeamWaistDiameter_um/2 spacing and plays at Fs = 1/PDT_s with one 2-ch NI task.
 %
 % hX,hY : galvo handles (e.g., hSI.hResourceStore.hResources{120/121})
 % x_um,y_um : numeric vectors (same length) of path coordinates in microns
 % PDT_s : pixel dwell time [s]
 %
 % Name/Value:
-%   'BeamWaistDiameter_um' (0.80) spatial step per sample [µm] (canonical)
+%   'BeamWaistDiameter_um' (0.80) beam waist diameter [µm] (canonical)
 %   'Dot_um'               (0.80) legacy alias for BeamWaistDiameter_um
 %   'Model'        ([])    micronsToDegrees calibration model (reused/returned)
 %   'StartHold_s'  (0.002) seconds to hold initial point
@@ -31,6 +31,7 @@ if ~isempty(p.Results.BeamWaistDiameter_um)
 else
     beamWaistDiameter_um = p.Results.Dot_um; % legacy alias path
 end
+rasterSpacing_um = wpRasterSpacingFromBeamWaist(beamWaistDiameter_um);
 model = p.Results.Model;
 tLead = p.Results.StartHold_s; tTail = p.Results.EndHold_s;
 bh = p.Results.BeamHandle; pf = p.Results.PowerFrac;
@@ -41,12 +42,12 @@ assert(all(abs(x_um)<=500 & abs(y_um)<=500), 'Coordinates must lie within ±500 
 assert(PDT_s>0,'PDT_s must be > 0');
 Fs = 1/PDT_s;
 
-% ---- Uniform arc-length resample to constant 0.80 µm spacing ----
+% ---- Uniform arc-length resample to canonical raster spacing ----
 x = x_um(:); y = y_um(:);
 dx = diff(x); dy = diff(y);
 s = [0; cumsum(hypot(dx,dy))];
 L = s(end); assert(L>0,'Zero-length path.');
-s_uniform = (0:beamWaistDiameter_um:L).';
+s_uniform = (0:rasterSpacing_um:L).';
 if s_uniform(end) < L, s_uniform(end+1) = L; end
 x_u = interp1(s,x,s_uniform,'pchip');
 y_u = interp1(s,y,s_uniform,'pchip');
@@ -108,7 +109,8 @@ if doPark, try hX.park(); end; try hY.park(); end; end
 stats = struct('Fs_Hz',Fs, 'N',N, 'duration_s',N/Fs, ...
                'elapsed_s',elapsed_s, ...
                'totalLength_um',L, ...
-               'speed_um_s', beamWaistDiameter_um / PDT_s);
+               'speed_um_s', rasterSpacing_um / PDT_s, ...
+               'rasterSpacing_um', rasterSpacing_um);
 end
 
 function cleanupDAQTask(tTask)

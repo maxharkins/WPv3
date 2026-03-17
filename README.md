@@ -67,6 +67,9 @@ Typical use:
     setScanimage("original")
     setScanimage("harkins")
 
+When switching to `"harkins"`, WayPoint now auto-prepares today's experiment
+folder tree under `.../Zhang&Brown/Experiments`.
+
 ---
 
 # Launch
@@ -74,6 +77,16 @@ Typical use:
 In MATLAB:
 
     WP
+
+Recommended daily bootstrap:
+
+    startWPDaily
+
+`startWPDaily` runs:
+1. `setScanimage("harkins")`
+2. `scanimage` (if not already active)
+3. Daily experiment folder creation
+4. `WP`
 
 WayPoint automatically binds to:
 - ScanImage (`hSI`, `hSICtl`)
@@ -95,6 +108,10 @@ Supported formats:
   - ScanPaths export format → imported directly
 
 All units are assumed to be microns.
+
+Imported-file naming context is tracked automatically:
+- Example: `violin.STL` -> `violin_STL`
+- This label is reused in default ScanPaths export filenames and run metadata.
 
 ---
 
@@ -126,7 +143,7 @@ These must be set before pressing **Plan ScanPaths**:
 - Extrusion Settings (for 2D inputs)
 - XY mask position
 
-These values determine discretization, slicing, and raster spacing.
+These values determine discretization and slicing. Raster spacing is derived from beam waist.
 
 For **2D Extrusion**, configure in **Extrusion Settings**:
 
@@ -179,6 +196,16 @@ Execution order:
 
 Pause, resume, and cancel operate only between completed path plays.
 
+Each run now writes a professional log bundle automatically:
+- `log/<runid>_summary.txt` (human-readable run report)
+- `log/<runid>_layers.csv` (tile/Z layer execution table)
+- `metadata/<runid>_metadata.json` (full machine-readable metadata)
+- `metadata/<runid>_metadata.mat` (full MATLAB struct snapshot)
+- `processed/<runid>_scanpaths_snapshot.txt` (planned path snapshot for reproducibility)
+
+Captured metadata includes execution settings (power, PDT, quantization, traversal),
+stage path, Z plan, imported source context, per-layer timing/status, and run outcome.
+
 ---
 
 # Z Traversal
@@ -197,17 +224,18 @@ Each Z layer produces a fixed-Z XY exposure path.
 
 # Beam Waist and Resampling
 
-Beam waist diameter controls XY raster spacing.
+Beam waist diameter sets the canonical raster spacing:
 
-Default: 0.8 µm
+    Raster Spacing (µm) = Beam Waist Diameter (µm) / 2
 
-Guidelines:
+This rule is used consistently for:
 
-- Smaller waist → denser sampling
-- Larger waist → sparser sampling
-- For highest resolution, keep beam waist spacing consistent with XY quantization
+- Mesh contour resampling and raster lane spacing
+- Image-mask scan-path generation
+- Galvo playback path resampling
+- Scan-time estimation
 
-Image-based path generation defaults to 0.8 µm if unspecified.
+Default beam waist diameter: 0.8 µm (therefore default raster spacing: 0.4 µm)
 
 ---
 
@@ -238,7 +266,7 @@ Image-based path generation defaults to 0.8 µm if unspecified.
 Playback sequence:
 
 1. Acquire X/Y galvo resources
-2. Resample path to uniform arc length
+2. Resample path to uniform arc length at `Beam Waist Diameter / 2`
 3. Convert microns → galvo angle → AO voltage
 4. Output finite 2-channel NI AO waveform
 5. Apply laser power fraction during playback
@@ -255,6 +283,39 @@ Recommended practice:
 - Keep reusable workflows here
 - Call core WayPoint functions
 - Avoid modifying app internals
+
+---
+
+# Experiment Directory + Repeatability Design
+
+WayPoint now targets this structure:
+
+    .../Zhang&Brown/Experiments/YYYY/YYYY-MM-DD_experiment-name/
+        log/
+        figures/
+        metadata/
+        processed/
+        raw/
+
+Behavior:
+- `YYYY`, `MM`, `DD` are auto-filled each day.
+- Suffix is preserved as `_experiment-name` by default (you can rename it later).
+- If a folder already exists for the same day (`YYYY-MM-DD_*`), WayPoint reuses it.
+- Subfolders are auto-created if missing.
+
+Design choice for many trials in one day:
+- Keep one day folder and create one run artifact bundle per scan run.
+- This avoids forcing "one experiment per day" while keeping trials indexed and reproducible.
+- If you split into multiple experiments the same day, create additional `YYYY-MM-DD_*`
+  folders manually; WayPoint will use the most recent matching day folder.
+
+Default ScanPaths export behavior:
+- Save dialog opens in today's `processed/` folder.
+- Suggested name uses imported source label:
+
+      violin_STL_ScanPaths_YYYYMMDD_HHMMSS.txt
+
+- You can edit before saving.
 
 ---
 
@@ -276,8 +337,17 @@ Recommended practice:
 - Visualize all Z layer extrusions in 3D view
 - Visualize exactly what the current ScanPath is during execution.
 - Convert dwell time units from ms to µs
+
+
+# Planned Improvements (From Mar. 16, 2026)
+
+- Make a folder within WayPoint\calibration\ that is the dedicated pockel cell calibration folder. fix the current log path in pockel cell calibartion and make it go there! and put all the other pockel cell calibration-related files in taht folder (you should have a histroical archive folder that contains the actual log things yk? dont just flood the folder taht also has files in it)
+
+# Future works (far into the future)
+
 - Replace serial stage control with proper hardware API
 
+ 
 ---
 
 WayPoint is designed for controlled, repeatable galvo-based fabrication and volumetric workflows. Always verify stage zero, Z limits, and power settings before execution.

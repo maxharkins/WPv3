@@ -1,6 +1,6 @@
 function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, varargin)
     % Play a parametric XY path given in microns at constant tangential velocity.
-    % The path is resampled to 0.80 µm per sample and played at Fs=1/PDT_s.
+    % The path is resampled to BeamWaistDiameter_um/2 per sample and played at Fs=1/PDT_s.
     %
     % Inputs
     %   hX, hY   : galvo handles (e.g., hSI.hResourceStore.hResources{120/121})
@@ -10,7 +10,8 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     %   PDT_s    : pixel dwell time [s] (time per sample)
     %
     % Name/Value options
-    %   'Dot_um'        : spatial step per sample (default 0.80 µm)
+    %   'BeamWaistDiameter_um' : beam waist diameter in µm (default [])
+    %   'Dot_um'               : legacy alias for BeamWaistDiameter_um (default 0.80 µm)
     %   'Model'         : calibration model for micronsToDegrees (default [])
     %   'Tspan'         : [t0 t1] if x_in/y_in are function handles (default [0 1])
     %   'Oversample'    : integer samples used before arc-length resample (default 5000)
@@ -31,10 +32,11 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     % Notes
     %   - Keeps galvos initialized (scanner-enable asserted).
     %   - Unreserves AOs under the correct users, plays one 2-ch NI task, then reserves back.
-    %   - Constant tangential velocity v = Dot_um / PDT_s.
+    %   - Constant tangential velocity v = (BeamWaistDiameter_um/2) / PDT_s.
     
     % ---- parse inputs ----
     p = inputParser;
+    p.addParameter('BeamWaistDiameter_um', [], @(x) isempty(x) || (isnumeric(x) && x > 0));
     p.addParameter('Dot_um',       0.80,  @(x)isnumeric(x) && x>0);
     p.addParameter('Model',        [],    @(x)true);
     p.addParameter('Tspan',        [0 1], @(x)isnumeric(x) && numel(x)==2);
@@ -45,7 +47,12 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     p.addParameter('PowerFrac',    [],    @(x)isempty(x) || (isscalar(x) && x>=0 && x<=1));
     p.addParameter('ParkWhenDone', false, @(x)islogical(x) || ismember(x,[0 1]));
     p.parse(varargin{:});
-    dot_um   = p.Results.Dot_um;
+    if ~isempty(p.Results.BeamWaistDiameter_um)
+        beamWaistDiameter_um = p.Results.BeamWaistDiameter_um;
+    else
+        beamWaistDiameter_um = p.Results.Dot_um; % legacy alias path
+    end
+    rasterSpacing_um = wpRasterSpacingFromBeamWaist(beamWaistDiameter_um);
     model    = p.Results.Model;
     tspan    = p.Results.Tspan;
     Nover    = p.Results.Oversample;
@@ -70,7 +77,7 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     assert(isvector(x_um) && isvector(y_um) && numel(x_um)==numel(y_um), 'x and y must be same-length vectors or function handles.');
     assert(all(abs(x_um) <= 500 & abs(y_um) <= 500), 'Coordinates must be within ±500 µm.');
     
-    % ---- uniform arc-length resample to constant step (0.80 µm) ----
+    % ---- uniform arc-length resample to canonical raster spacing ----
     dx  = diff(x_um); dy = diff(y_um);
     ds  = hypot(dx,dy);
     s   = [0; cumsum(ds)];
@@ -78,7 +85,7 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     if L == 0
         error('Path length is zero.');
     end
-    s_step = dot_um;
+    s_step = rasterSpacing_um;
     s_uniform = (0:s_step:L).';
     % Ensure the last point lands exactly on the end:
     if s_uniform(end) < L, s_uniform(end+1) = L; end
@@ -158,6 +165,7 @@ function [stats, model] = playParametricMicronPath(hX, hY, x_in, y_in, PDT_s, va
     stats.duration_s    = N/Fs;
     stats.elapsed_s     = elapsed_s;
     stats.totalLength_um= L;
-    stats.speed_um_s    = dot_um / PDT_s;     % constant tangential speed
+    stats.speed_um_s    = rasterSpacing_um / PDT_s;     % constant tangential speed
+    stats.rasterSpacing_um = rasterSpacing_um;
     
 end

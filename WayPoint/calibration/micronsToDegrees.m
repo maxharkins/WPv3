@@ -17,7 +17,7 @@ function [x_theta, y_theta, model] = micronsToDegrees(x_um, y_um, model)
 %   - The fit is most reliable within |x| <= model.domain_um(2).
 %
 % AUTHOR ASSUMPTIONS
-%   - FOVmicrons(z) is given by your getFOVfromZoom(z).
+%   - FOVmicrons(z) is given by your zoom2microns(z).
 %   - FOVdegrees(z) uses the same constants you used in getMicronsPerDegree.
 
     if nargin < 3 || isempty(model)
@@ -43,7 +43,7 @@ function model = calibrate_um_to_deg(zoomGrid)
     end
 
     % Gather half-FOV endpoints across zooms (symmetry ⇒ use +x only)
-    x_edge_um   = arrayfun(@(z) getFOVfromZoom(z)/2, zoomGrid);       % [µm]
+    x_edge_um   = arrayfun(@(z) zoom2microns(z)/2, zoomGrid);       % [µm]
     theta_edge  = arrayfun(@(z) deg2rad_local(localFOVdeg(z)/2), zoomGrid); % [rad]
 
     % Fit the odd rational model: theta = (a1*x + a3*x^3) / (1 + c2*x^2)

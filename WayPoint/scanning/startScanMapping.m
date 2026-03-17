@@ -7,7 +7,8 @@ function startScanMapping(hWP)
 %   - Skips empty tiles / missing Z-levels / missing paths gracefully
 %   - Ensures each scan path has >= 2 points (prevents zero-length playback)
 %   - Correct scan-time estimate consistent with playPreexistingPath resampling
-%   - Uses hWP.Settings.Power_pct (0..100) -> PowerFrac (0..1) with clamping
+%   - Resolves power from either hWP.Settings.Power_pct or Power_mW
+%     (with Pockels calibration) and maps to PowerFrac robustly
 %   - Safer Z motion: sanity-check delta, move, then verify arrival tolerance
 %   - (Optional) Finds X/Y galvo resources by name, with fallback to indices 118/119
 %   - Checks Z-level quantization (0.01 µm) and warns/rounds to nearest step
@@ -19,47 +20,67 @@ function startScanMapping(hWP)
     % ---- time estimate for entire stack (your existing helper)
     figure
     [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP);
+    runLog = initRunLog(hWP, allTime_min, sliceTimes_min);
 
     fprintf('Started at: %s\n', timeofday(datetime('now')));
     fprintf('Expected end: %s\n', timeofday(datetime('now')) + minutes(allTime_min));
 
-    % ---- stack + stage
-    stack     = hWP.hStacks;
-    stagePath = hWP.aPath.Coordinates;
+    try
+        % ---- stack + stage
+        stack     = hWP.hStacks;
+        stagePath = hWP.aPath.Coordinates;
 
-    scanPaths = stack.ScanPaths(:);    % normalize to column cell array
-    numTiles  = numel(scanPaths);
+        scanPaths = stack.ScanPaths(:);    % normalize to column cell array
+        numTiles  = numel(scanPaths);
 
-    % ---- beam + galvos
-    beam = hWP.hSI.hScan2D.hBeams{1};
-    [hX, hY] = getXYGalvos(hWP);
-    if isempty(hX) || isempty(hY)
-        error('Could not acquire X/Y galvo handles.');
-    end
+        % ---- beam + galvos
+        beam = hWP.hSI.hScan2D.hBeams{1};
+        [hX, hY] = getXYGalvos(hWP);
+        if isempty(hX) || isempty(hY)
+            error('Could not acquire X/Y galvo handles.');
+        end
 
-    % ---- playback parameters
-    PDT_s = hWP.Settings.PixelDwellTime_ms / 1000;   % seconds
-    beamWaistDiameter_um = hWP.Settings.BeamWaistDiameter_um; % µm
-    leadS = 0.004;
-    tailS = 0.002;
+        % ---- playback parameters
+        PDT_s = hWP.Settings.PixelDwellTime_ms / 1000;   % seconds
+        beamWaistDiameter_um = hWP.Settings.BeamWaistDiameter_um; % µm
+        rasterSpacing_um = wpRasterSpacingFromBeamWaist(beamWaistDiameter_um);
+        leadS = 0.004;
+        tailS = 0.002;
 
-    % ---- power (0..100 → 0..1)
-    if ~isfield(hWP.Settings,'Power_pct') || isempty(hWP.Settings.Power_pct)
-        error('hWP.Settings.Power_pct missing.');
-    end
-    Pf = max(0, min(1, double(hWP.Settings.Power_pct) / 100));
+        % Pull latest UI values directly when fields exist.
+        if isprop(hWP, 'Power_Pct_Edit_Field')
+            hWP.Settings.Power_pct = hWP.Power_Pct_Edit_Field.Value;
+        elseif isprop(hWP, 'Power_Edit_Field')
+            hWP.Settings.Power_pct = hWP.Power_Edit_Field.Value;
+        end
+        if isprop(hWP, 'Power_mW_Edit_Field')
+            hWP.Settings.Power_mW = hWP.Power_mW_Edit_Field.Value;
+        end
 
-    % ---- Z constraints
-    zStep_um          = 0.01;     % quantization step
-    zMaxDeltaGuard   = 800;     % absolute guardrail (µm)
-    zArriveTol_um    = 0.05;     % arrival tolerance (µm)
+        % ---- power resolve (pct or objective-exit mW) -> power fraction
+        [Pf, resolvedPct, resolvedObj_mW] = resolvePowerFraction(hWP.Settings);
+        hWP.Settings.Power_pct = resolvedPct;
+        hWP.Settings.Power_mW = resolvedObj_mW;
+        if isprop(hWP, 'Power_Pct_Edit_Field')
+            hWP.Power_Pct_Edit_Field.Value = resolvedPct;
+        elseif isprop(hWP, 'Power_Edit_Field')
+            hWP.Power_Edit_Field.Value = resolvedPct;
+        end
+        if isprop(hWP, 'Power_mW_Edit_Field') && isfinite(resolvedObj_mW)
+            hWP.Power_mW_Edit_Field.Value = resolvedObj_mW;
+        end
 
-    % ---- mask offset (single source of truth)
+        % ---- Z constraints
+        zStep_um          = 0.01;     % quantization step
+        zMaxDeltaGuard   = 800;     % absolute guardrail (µm)
+        zArriveTol_um    = 0.05;     % arrival tolerance (µm)
+
+        % ---- mask offset (single source of truth)
 
     % ============================================================
     % TILE LOOP
     % ============================================================
-    for tileIdx = 1:numTiles
+        for tileIdx = 1:numTiles
 
         % ---- skip empty tile
         if tileIdx > numel(scanPaths) || isempty(scanPaths{tileIdx})
@@ -75,6 +96,7 @@ function startScanMapping(hWP)
             end
         catch ME
             warning('Stage move failed for Tile %d: %s', tileIdx, ME.message);
+            runLog.events(end+1) = buildEvent('stage_move_failed', tileIdx, 0, ME.message); %#ok<AGROW>
             continue;
         end
 
@@ -120,9 +142,12 @@ function startScanMapping(hWP)
         % ========================================================
         % Z LOOP
         % ========================================================
-        for zIdx = 1:numel(zLevels)
+            for zIdx = 1:numel(zLevels)
+            runLog.counts.layersAttempted = runLog.counts.layersAttempted + 1;
 
             if isempty(tilePaths{zIdx})
+                runLog.counts.layersSkipped = runLog.counts.layersSkipped + 1;
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLevels(zIdx), NaN, 0, NaN, 0, "empty_path", ""); %#ok<AGROW>
                 continue;
             end
 
@@ -130,22 +155,31 @@ function startScanMapping(hWP)
 
             zWorld = zLocal + hWP.hMask.Position(3);
             realZ  = hWP.hSI.hMotors.samplePosition(:,3);
-            
+            zDelta = abs(realZ - zWorld);
 
+            
             % ---- guardrail
-            if abs(realZ - zWorld) >= zMaxDeltaGuard
+            if zDelta >= zMaxDeltaGuard
                 warning('Refusing Z move: current %.2f µm, target %.2f µm (Δ=%.2f µm)', ...
-                        realZ, zWorld, abs(realZ - zWorld));
+                        realZ, zWorld, zDelta);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.status = "aborted_guardrail";
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, 0, NaN, 0, "z_guardrail_abort", "Exceeded Z delta guard.", zDelta); %#ok<AGROW>
+                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                finalizeRunLog(hWP, runLog);
                 return;
             end
 
             % ---- move Z
+            moveErr = "";
+            moveStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             tic
             try
                 hWP.hSI.hMotors.moveSample([0 0 zWorld]);
                 try % plot on the figure
                     plot(x_um, y_um, '-')
                     xlim([-500,500]),ylim([-500,500])
+                    xlabel('x (μm)'),ylabel('y (μm)')
                     axis equal
                 catch
                     % do nothing
@@ -157,9 +191,12 @@ function startScanMapping(hWP)
                 
             catch ME
                 warning('Z move failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
+                moveErr = string(ME.message);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, 0, NaN, 0, "z_move_failed", moveErr, zDelta, moveStart, string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'))); %#ok<AGROW>
                 continue;
             end
-            toc
+            moveElapsed = toc;
 
             realZ2 = hWP.hSI.hMotors.samplePosition(:,3);
             if abs(realZ2 - zWorld) > zArriveTol_um
@@ -167,56 +204,53 @@ function startScanMapping(hWP)
             end
 
             % ---- XY path (translate AFTER Z success)
-            rawPathXY = tilePaths{zIdx};
-            subPaths = splitPathByNaN(rawPathXY);
-            if isempty(subPaths)
+            scanPathXY = tilePaths{zIdx};
+            scanPathXY = unique(scanPathXY, 'rows', 'stable');
+
+            if size(scanPathXY,1) < 2
                 fprintf('Tile %d Z %d: path too short, skipping.\n', tileIdx, zIdx);
+                runLog.counts.layersSkipped = runLog.counts.layersSkipped + 1;
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), NaN, 0, "path_too_short", "Path had fewer than two points.", zDelta); %#ok<AGROW>
                 continue;
             end
 
-            totalLength_um = 0;
-            for pIdx = 1:numel(subPaths)
-                sp = unique(subPaths{pIdx}, 'rows', 'stable');
-                if size(sp,1) < 2
-                    continue;
-                end
-                subPaths{pIdx} = sp;
-                totalLength_um = totalLength_um + sum(hypot(diff(sp(:,1)), diff(sp(:,2))));
-            end
+            x_um = scanPathXY(:,1);
+            y_um = scanPathXY(:,2);
 
-            estimatedTime_s = (totalLength_um / beamWaistDiameter_um) * PDT_s + numel(subPaths) * (leadS + tailS);
+            % ---- bounds safety
+            assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
+                'Path exceeds ±500 µm bounds.');
+
+            % ---- time estimate
+            totalLength_um = sum(hypot(diff(x_um), diff(y_um)));
+            estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + leadS + tailS;
+
             fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s\n', ...
                     tileIdx, zIdx, zWorld, estimatedTime_s);
 
-            fprintf("\nPDT (ms): %.6f\n", PDT_s*1E3)
-            fprintf("Pf (0-1): %.2f\n\n", Pf)
-
-            for pIdx = 1:numel(subPaths)
-                sp = subPaths{pIdx};
-                if size(sp,1) < 2
-                    continue;
-                end
-
-                x_um = sp(:,1);
-                y_um = sp(:,2);
-
-                % ---- bounds safety
-                assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
-                    'Path exceeds ±500 µm bounds.');
-
-                try
-                    playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
-                        'BeamWaistDiameter_um', beamWaistDiameter_um, ...
-                        'BeamHandle', beam, ...
-                        'PowerFrac', Pf, ...
-                        'StartHold_s', leadS, ...
-                        'EndHold_s', tailS, ...
-                        'ParkWhenDone', false);
-                catch ME
-                    warning('Scan failed (Tile %d Z %d part %d): %s', tileIdx, zIdx, pIdx, ME.message);
-                    continue;
-                end
+            % ---- execute scan
+            scanStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+            status = "completed";
+            errMsg = moveErr;
+            try
+                playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
+                    'BeamWaistDiameter_um', beamWaistDiameter_um, ...
+                    'BeamHandle', beam, ...
+                    'PowerFrac', Pf, ...
+                    'StartHold_s', leadS, ...
+                    'EndHold_s', tailS, ...
+                    'ParkWhenDone', false);
+            catch ME
+                warning('Scan failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
+                status = "scan_failed";
+                errMsg = string(ME.message);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS')), moveElapsed); %#ok<AGROW>
+                continue;
             end
+            scanEnd = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+            runLog.counts.layersCompleted = runLog.counts.layersCompleted + 1;
+            runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, scanEnd, moveElapsed); %#ok<AGROW>
             
             drawnow % make sure pause updates
 
@@ -226,6 +260,9 @@ function startScanMapping(hWP)
             % ---- optional cancel check (future)
             if isprop(hWP,'isCancelled') && hWP.isCancelled
                 warning('Scan cancelled by user.');
+                runLog.status = "cancelled";
+                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                finalizeRunLog(hWP, runLog);
                 return;
             end
 
@@ -234,37 +271,17 @@ function startScanMapping(hWP)
             %     updateTimeProgressBar(hWP, tileIdx, zIdx, allTime_min, sliceTimes_min);
             % catch
             % end
-        end
-    end % Double counting tranlated positions with .txt files (at least known for scanpaths on Feb 22, 2026)
-
-    disp('DONE!');
-end
-
-function parts = splitPathByNaN(pathXY)
-    parts = {};
-    if isempty(pathXY) || size(pathXY,2) < 2
-        return;
-    end
-
-    isBreak = any(isnan(pathXY), 2);
-    startIdx = 1;
-    for i = 1:size(pathXY,1)
-        if isBreak(i)
-            if i-1 >= startIdx
-                seg = pathXY(startIdx:i-1, :);
-                if size(seg,1) >= 2
-                    parts{end+1,1} = seg; %#ok<AGROW>
-                end
             end
-            startIdx = i + 1;
-        end
-    end
-
-    if startIdx <= size(pathXY,1)
-        seg = pathXY(startIdx:end, :);
-        if size(seg,1) >= 2
-            parts{end+1,1} = seg; %#ok<AGROW>
-        end
+        end % Double counting tranlated positions with .txt files (at least known for scanpaths on Feb 22, 2026)
+        runLog.status = "completed";
+        runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+        finalizeRunLog(hWP, runLog);
+    catch ME
+        runLog.status = "error";
+        runLog.events(end+1) = buildEvent('fatal_error', 0, 0, ME.message); %#ok<AGROW>
+        runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+        finalizeRunLog(hWP, runLog);
+        rethrow(ME);
     end
 end
 
@@ -318,5 +335,297 @@ function waitIfPaused(app)
         end
         drawnow;      % allows Pause/Resume/Cancel callbacks to run
         pause(0.05);  % light throttle, not a hard block
+    end
+end
+
+function runLog = initRunLog(hWP, allTime_min, sliceTimes_min)
+    startedAt = datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS');
+    runId = sprintf('scanrun_%s', datestr(startedAt, 'yyyymmdd_HHMMSS'));
+
+    imported = struct('path', '', 'label', '');
+    try
+        if isappdata(hWP.UIFigure, 'WPImportedFilePath')
+            imported.path = getappdata(hWP.UIFigure, 'WPImportedFilePath');
+        end
+        if isappdata(hWP.UIFigure, 'WPImportedFileLabel')
+            imported.label = getappdata(hWP.UIFigure, 'WPImportedFileLabel');
+        end
+    catch
+    end
+
+    stackSummary = struct('numTiles', 0, 'zLayersPerTile', [], 'pointsPerTile', []);
+    try
+        scanPaths = hWP.hStacks.ScanPaths;
+        stackSummary.numTiles = numel(scanPaths);
+        zLayers = zeros(numel(scanPaths), 1);
+        pts = zeros(numel(scanPaths), 1);
+        for t = 1:numel(scanPaths)
+            tile = scanPaths{t};
+            if isempty(tile), continue; end
+            zLayers(t) = numel(tile);
+            for z = 1:numel(tile)
+                if ~isempty(tile{z})
+                    pts(t) = pts(t) + size(tile{z}, 1);
+                end
+            end
+        end
+        stackSummary.zLayersPerTile = zLayers;
+        stackSummary.pointsPerTile = pts;
+    catch
+    end
+
+    runLog = struct();
+    runLog.runId = runId;
+    runLog.status = "running";
+    runLog.startedAt_local = char(startedAt);
+    runLog.endedAt_local = '';
+    runLog.duration_s = NaN;
+    runLog.host = char(getenv('COMPUTERNAME'));
+    if isempty(runLog.host)
+        runLog.host = char(getenv('HOSTNAME'));
+    end
+    runLog.matlabVersion = version;
+    runLog.estimatedTotalTime_min = allTime_min;
+    runLog.estimatedSliceTimes_min = sliceTimes_min;
+    runLog.settings = safeStruct(hWP.Settings);
+    runLog.maskPosition_um = safeGetMaskPos(hWP);
+    runLog.stagePath_um = safeGetStagePath(hWP);
+    runLog.arbitraryZs_um = safeGetArbitraryZs(hWP);
+    runLog.stackSummary = stackSummary;
+    runLog.importedFile = imported;
+    runLog.layers = repmat(buildLayerRecord(0,0,NaN,NaN,0,NaN,NaN,"","",""), 0, 1);
+    runLog.events = repmat(buildEvent("init",0,0,""), 0, 1);
+    runLog.counts = struct('tilesTotal', stackSummary.numTiles, 'layersAttempted', 0, ...
+                           'layersCompleted', 0, 'layersSkipped', 0, 'layersFailed', 0);
+end
+
+function rec = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, nPts, pathLen, estTime, status, errMsg, zDelta, startStr, endStr, moveElapsed)
+    if nargin < 10, zDelta = NaN; end
+    if nargin < 11 || isempty(startStr), startStr = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS')); end
+    if nargin < 12 || isempty(endStr), endStr = startStr; end
+    if nargin < 13, moveElapsed = NaN; end
+
+    rec = struct();
+    rec.tileIdx = tileIdx;
+    rec.zIdx = zIdx;
+    rec.zLocal_um = zLocal;
+    rec.zWorld_um = zWorld;
+    rec.pathPointCount = nPts;
+    rec.pathLength_um = pathLen;
+    rec.estimatedTime_s = estTime;
+    rec.status = char(status);
+    rec.error = char(errMsg);
+    rec.zMoveDelta_um = zDelta;
+    rec.zMoveTime_s = moveElapsed;
+    rec.startedAt_local = char(startStr);
+    rec.endedAt_local = char(endStr);
+end
+
+function evt = buildEvent(kind, tileIdx, zIdx, message)
+    evt = struct();
+    evt.time_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+    evt.kind = char(kind);
+    evt.tileIdx = tileIdx;
+    evt.zIdx = zIdx;
+    evt.message = char(message);
+end
+
+function s = safeStruct(v)
+    if isstruct(v)
+        s = v;
+    else
+        s = struct();
+    end
+end
+
+function p = safeGetMaskPos(hWP)
+    p = [NaN NaN NaN];
+    try
+        p = hWP.hMask.Position;
+    catch
+    end
+end
+
+function p = safeGetStagePath(hWP)
+    p = [];
+    try
+        p = hWP.aPath.Coordinates;
+    catch
+    end
+end
+
+function z = safeGetArbitraryZs(hWP)
+    z = {};
+    try
+        z = hWP.hStacks.ArbitraryZs;
+    catch
+    end
+end
+
+function [powerFrac, resolvedPct, resolvedObj_mW] = resolvePowerFraction(settings)
+    pct = getSettingScalar(settings, 'Power_pct', NaN);
+    obj_mW = getSettingScalar(settings, 'Power_mW', NaN);
+
+    hasPct = isfinite(pct);
+    hasObj = isfinite(obj_mW);
+
+    if hasObj
+        if ~isfield(settings, 'PockelsCalibration') || ~isstruct(settings.PockelsCalibration) || isempty(fieldnames(settings.PockelsCalibration))
+            error('Power_mW requested but Settings.PockelsCalibration is missing. Run pockelsCellPowerCalibration first.');
+        end
+        pct = objectivePower_mWToPercent(settings.PockelsCalibration, obj_mW);
+        hasPct = true;
+    end
+
+    if ~hasPct
+        error('Neither Settings.Power_pct nor calibrated Settings.Power_mW is available.');
+    end
+
+    resolvedPct = max(0, min(100, double(pct)));
+    powerFrac = resolvedPct / 100;
+
+    if hasObj
+        resolvedObj_mW = double(obj_mW);
+    else
+        resolvedObj_mW = percentToObjectivePower_mW(settings, resolvedPct);
+    end
+end
+
+function mW = percentToObjectivePower_mW(settings, pct)
+    mW = NaN;
+    if ~isfield(settings, 'PockelsCalibration') || ~isstruct(settings.PockelsCalibration)
+        return;
+    end
+    c = settings.PockelsCalibration;
+    try
+        if isfield(c, 'percentToPowerObjective_mW') && isa(c.percentToPowerObjective_mW, 'function_handle')
+            mW = double(c.percentToPowerObjective_mW(pct));
+            return;
+        end
+        if isfield(c, 'A') && isfield(c, 'omega') && isfield(c, 'phi') && isfield(c, 'D') && isfield(c, 'powerEfficiency')
+            powerW = c.A .* sin(c.omega .* pct + c.phi) + c.D;
+            mW = double((powerW ./ c.powerEfficiency) * 1e3);
+        end
+    catch
+        mW = NaN;
+    end
+end
+
+function pct = objectivePower_mWToPercent(cal, obj_mW)
+    obj_W = obj_mW / 1e3;
+    if isfield(cal, 'powerObjective_WToPercent') && isa(cal.powerObjective_WToPercent, 'function_handle')
+        pct = double(cal.powerObjective_WToPercent(obj_W));
+        return;
+    end
+    if isfield(cal, 'objectivePowerToPCPower') && isa(cal.objectivePowerToPCPower, 'function_handle') && ...
+       isfield(cal, 'powerToPercent') && isa(cal.powerToPercent, 'function_handle')
+        pcW = cal.objectivePowerToPCPower(obj_W);
+        pct = double(cal.powerToPercent(pcW));
+        return;
+    end
+    req = {'A','omega','phi','D','powerEfficiency'};
+    for i = 1:numel(req)
+        if ~isfield(cal, req{i})
+            error('PockelsCalibration is missing "%s".', req{i});
+        end
+    end
+    pcW = obj_W * cal.powerEfficiency;
+    pct = powerToPercentFromParams(pcW, cal.A, cal.omega, cal.phi, cal.D);
+end
+
+function val = getSettingScalar(settings, fieldName, fallback)
+    val = fallback;
+    if isstruct(settings) && isfield(settings, fieldName)
+        v = settings.(fieldName);
+        if isnumeric(v) && isscalar(v) && isfinite(v)
+            val = double(v);
+        end
+    end
+end
+
+function percent = powerToPercentFromParams(power, A, omega, phi, D)
+    if abs(A) < eps
+        error('Calibration amplitude is too small; inversion is ill-defined.');
+    end
+    if abs(omega) < eps
+        error('Calibration omega is too small; inversion is ill-defined.');
+    end
+
+    Pmin = D - abs(A);
+    Pmax = D + abs(A);
+    tol = 1e-9;
+    if any(power < (Pmin - tol) | power > (Pmax + tol))
+        error('Requested power outside calibrated downstream range [%.6g, %.6g] W.', Pmin, Pmax);
+    end
+
+    power = power(:);
+    percent = zeros(size(power));
+    period = abs(2 * pi / omega);
+
+    for i = 1:numel(power)
+        s = (power(i) - D) / A;
+        s = min(max(s, -1), 1);
+        alpha = asin(s);
+
+        b1 = (alpha - phi) / omega;
+        b2 = (pi - alpha - phi) / omega;
+
+        nMin = floor((0 - max([b1 b2])) / period) - 1;
+        nMax = ceil((100 - min([b1 b2])) / period) + 1;
+        k = nMin:nMax;
+
+        candidates = [b1 + k * period, b2 + k * period];
+        inRange = candidates >= 0 & candidates <= 100;
+        candidates = candidates(inRange);
+
+        if isempty(candidates)
+            wrapped = mod([b1 b2], period);
+            candidates = wrapped;
+            inRange = candidates >= 0 & candidates <= 100;
+            candidates = candidates(inRange);
+        end
+
+        if isempty(candidates)
+            error('No valid percent solution found in [0, 100] for requested power.');
+        end
+
+        modeled = A .* sin(omega .* candidates + phi) + D;
+        [~, idx] = min(abs(modeled - power(i)));
+        percent(i) = candidates(idx);
+    end
+
+    percent = double(percent(1));
+end
+
+function finalizeRunLog(hWP, runLog)
+    try
+        if isempty(runLog.endedAt_local)
+            runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+        end
+        t0 = datetime(runLog.startedAt_local, 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSS');
+        t1 = datetime(runLog.endedAt_local, 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSS');
+        runLog.duration_s = seconds(t1 - t0);
+
+        if strcmp(runLog.status, "running")
+            runLog.status = "completed";
+        end
+
+        try
+            runLog.finalMotorPosition_um = hWP.hSI.hMotors.samplePosition;
+        catch
+            runLog.finalMotorPosition_um = [NaN NaN NaN];
+        end
+
+        out = wpWriteScanRunArtifacts(hWP, runLog);
+        if out.ok
+            fprintf('[WP Log] Summary: %s\n', out.paths.summaryTxt);
+            fprintf('[WP Log] Metadata: %s\n', out.paths.metadataJson);
+            fprintf('[WP Log] Layers: %s\n', out.paths.layersCsv);
+            fprintf('[WP Log] ScanPaths snapshot: %s\n', out.paths.scanPathsSnapshot);
+        else
+            warning('[WP Log] Failed to write run artifacts: %s', out.message);
+        end
+    catch ME
+        warning('[WP Log] finalizeRunLog failed: %s', ME);
     end
 end

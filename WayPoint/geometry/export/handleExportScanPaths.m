@@ -38,11 +38,17 @@ function handleExportScanPaths(app)
     zStr  = strrep(sprintf('%.4g', zStep_um),  '.', 'p');
     suggestedName = sprintf('ScanPaths_Z-interval-%sum_XY-interval-%sum.txt', zStr, xyStr);
 
+    defaultPrompt = suggestedName;
+    try
+        [defaultPrompt, ~] = wpBuildScanPathExportDefault(app, suggestedName);
+    catch
+    end
+
     % ---- Prompt destination ----
     [fileName, folderPath] = uiputfile( ...
         {'*.txt', 'Text Files (*.txt)'}, ...
         'Export ScanPaths', ...
-        suggestedName);
+        defaultPrompt);
 
     if isequal(fileName, 0) || isequal(folderPath, 0)
         return;

@@ -8,9 +8,21 @@ function initializeApp(hWP)
 
     % SETTINGS:
     hWP.Settings.ZoomFactor             = hWP.Zoom_Factor_Spinner.Value;
-    hWP.Settings.FOVSize_um             = getFOVfromZoom(hWP.Settings.ZoomFactor);
+    hWP.Settings.FOVSize_um             = zoom2microns(hWP.Settings.ZoomFactor);
     hWP.Settings.TileOverlap_um         = hWP.Tile_Overlap_Edit_Field.Value;
-    hWP.Settings.Power_pct              = hWP.Power_Edit_Field.Value;
+    if isprop(hWP, 'Power_Pct_Edit_Field')
+        hWP.Settings.Power_pct = hWP.Power_Pct_Edit_Field.Value;
+    elseif isprop(hWP, 'Power_Edit_Field')
+        hWP.Settings.Power_pct = hWP.Power_Edit_Field.Value;
+    else
+        hWP.Settings.Power_pct = NaN;
+    end
+    if isprop(hWP, 'Power_mW_Edit_Field')
+        hWP.Settings.Power_mW = hWP.Power_mW_Edit_Field.Value;
+    else
+        hWP.Settings.Power_mW = NaN;
+    end
+    hWP.Settings.PockelsCalibration     = struct();
     hWP.Settings.PixelDwellTime_ms      = hWP.Pixel_Dwell_Time_Edit_Field.Value;
     hWP.Settings.QuantFactorXY_um       = hWP.XY_Quant_Factor_Edit_Field.Value;
     hWP.Settings.QuantFactorZ_um        = hWP.Z_Quant_Factor_Edit_Field.Value;
