@@ -213,7 +213,9 @@ function startScanMapping(hWP)
                 runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), NaN, 0, "path_too_short", "Path had fewer than two points.", zDelta); %#ok<AGROW>
                 continue;
             end
-
+           
+            scanPathXY = rmmissing(scanPathXY,1); % remove NaN
+            
             x_um = scanPathXY(:,1);
             y_um = scanPathXY(:,2);
 

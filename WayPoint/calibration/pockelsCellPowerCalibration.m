@@ -344,7 +344,7 @@ end
 end
 
 function setPowerFractionSafe(hSI, pf)
-%hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
+hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
 end
 
 function [outDir, baseStem] = resolveOutputPath(savePathOpt, saveDirOpt)
