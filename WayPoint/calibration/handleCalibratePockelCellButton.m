@@ -12,26 +12,21 @@ fprintf('\n[WP] Starting Pockels calibration workflow...\n');
 userChoice = "recalibrate";
 
 [recentCal, recentPath, recentAgeMin] = tryLoadRecentCalibration();
-if ~isempty(recentCal)
-    userChoice = askCalibrationChoice(app, recentPath, recentAgeMin);
-    switch userChoice
-        case "reuse"
-            [cal, selectedPath, selectedAgeMin, ok] = chooseCalibrationForReuse(app, recentPath, recentAgeMin);
-            if ~ok
-                fprintf('[WP] Calibration selection cancelled by user.\n');
-                return;
-            end
-            recentPath = selectedPath;
-            recentAgeMin = selectedAgeMin;
-            fprintf('[WP] Reusing selected calibration: %s\n', recentPath);
-        case "recalibrate"
-            cal = pockelsCellPowerCalibration(app.hSI, 'ShowPlot', true);
-        otherwise
-            fprintf('[WP] Calibration cancelled by user.\n');
+userChoice = askCalibrationChoice(app, recentPath, recentAgeMin, ~isempty(recentCal));
+switch userChoice
+    case "import"
+        [cal, selectedPath, ~, ok] = chooseCalibrationForReuse(app, recentPath, recentAgeMin);
+        if ~ok
+            fprintf('[WP] Calibration selection cancelled by user.\n');
             return;
-    end
-else
-    cal = pockelsCellPowerCalibration(app.hSI, 'ShowPlot', true);
+        end
+        recentPath = selectedPath;
+        fprintf('[WP] Importing selected calibration: %s\n', recentPath);
+    case "recalibrate"
+        cal = pockelsCellPowerCalibration(app.hSI, 'ShowPlot', true);
+    otherwise
+        fprintf('[WP] Calibration cancelled by user.\n');
+        return;
 end
 
 if ~isSinSquaredCalibration(cal)
@@ -40,7 +35,7 @@ if ~isSinSquaredCalibration(cal)
 end
 
 app.Settings.PockelsCalibration = cal;
-if ~isempty(recentPath) && strcmpi(userChoice, "reuse")
+if ~isempty(recentPath) && strcmpi(userChoice, "import")
     app.Settings.PockelsCalibrationPath = recentPath;
 elseif isfield(cal, 'paths') && isfield(cal.paths, 'mat')
     app.Settings.PockelsCalibrationPath = cal.paths.mat;
@@ -64,18 +59,27 @@ end
 fprintf('[WP] Pockels calibration complete.\n');
 end
 
-function choice = askCalibrationChoice(app, recentPath, recentAgeMin)
-msg = sprintf(['A recent sin^2 Pockels calibration was found.\n\n' ...
-               'File: %s\nAge: %.1f minutes\n\n' ...
-               'Choose a calibration file to reuse, or run a new calibration?'], recentPath, recentAgeMin);
+function choice = askCalibrationChoice(app, recentPath, recentAgeMin, hasRecent)
+if nargin < 4
+    hasRecent = false;
+end
+
+if hasRecent
+    msg = sprintf(['A recent sin^2 Pockels calibration was found.\n\n' ...
+                   'File: %s\nAge: %.1f minutes\n\n' ...
+                   'Import a calibration file, or run a new calibration?'], recentPath, recentAgeMin);
+else
+    msg = ['No recent sin^2 Pockels calibration was found.' newline newline ...
+           'Import a calibration file, or run a new calibration?'];
+end
 choice = "recalibrate";
 try
     btn = uiconfirm(app.UIFigure, msg, 'Pockels Calibration', ...
-        'Options', {'Reuse Recent', 'Recalibrate', 'Cancel'}, ...
-        'DefaultOption', 1, 'CancelOption', 3);
+        'Options', {'Import Calibration', 'Recalibrate', 'Cancel'}, ...
+        'DefaultOption', 2, 'CancelOption', 3);
     switch string(btn)
-        case "Reuse Recent"
-            choice = "reuse";
+        case "Import Calibration"
+            choice = "import";
         case "Recalibrate"
             choice = "recalibrate";
         otherwise
@@ -84,9 +88,9 @@ try
 catch
     % Fallback for environments without uiconfirm.
     fprintf('%s\n', msg);
-    ansStr = lower(strtrim(input('Type [r]euse (pick file), [n]ew, or [c]ancel: ', 's')));
-    if startsWith(ansStr, 'r')
-        choice = "reuse";
+    ansStr = lower(strtrim(input('Type [i]mport, [n]ew, or [c]ancel: ', 's')));
+    if startsWith(ansStr, 'i')
+        choice = "import";
     elseif startsWith(ansStr, 'c')
         choice = "cancel";
     else
