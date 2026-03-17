@@ -105,6 +105,14 @@ WPv3 now includes a Z-only motion API that reuses existing ScanImage objects
   - `WayPoint/movement/zfast/getZaxis_fast.m`
   - `WayPoint/movement/zfast/waitZaxis_fast.m`
 
+Runtime policy in `startScanMapping` (zfast refactor):
+
+- Z is tracked in software across layers (like XY stage path state).
+- Per-layer `queryPosition(...)` reads are avoided for speed.
+- Safety anchor queries are still performed:
+  - once at the beginning of `startScanMapping`
+  - on the first executable Z layer of each tile
+
 Function signature:
 
     out = moveZaxis_fast(hSI_or_hSICtl, zValue, ...
@@ -242,8 +250,9 @@ These must be set before pressing **Start Line Scan**:
 
 Important:
 
-- Z-axis must be zeroed to desired level before execution.
-- A safety check aborts motion if a single Z jump exceeds 800 µm.
+- Start from a known safe Z reference before execution.
+- Startup and first-layer-per-tile safety checks re-anchor Z against hardware.
+- A safety check aborts motion if a planned single Z jump exceeds 800 µm.
 
 ---
 
@@ -253,7 +262,13 @@ Click **Start Line Scans**.
 
 Execution order:
 
+    startup:
+        anchor-query Z once
+        guard first planned jump
+
     for each tile
+        anchor-query Z at first executable layer
+        guard first tile-layer jump
         for each Z layer
             move stage (XY)
             move objective (Z)

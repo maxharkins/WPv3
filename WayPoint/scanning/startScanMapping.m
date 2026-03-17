@@ -9,7 +9,8 @@ function startScanMapping(hWP)
 %   - Correct scan-time estimate consistent with playPreexistingPath resampling
 %   - Resolves power from either hWP.Settings.Power_pct or Power_mW
 %     (with Pockels calibration) and maps to PowerFrac robustly
-%   - Safer Z motion: sanity-check delta, move, then verify arrival tolerance
+%   - Safer Z motion with zfast: track Z in software, anchor-query at startup
+%     and first layer of each tile, then move without per-layer queries
 %   - (Optional) Finds X/Y galvo resources by name, with fallback to indices 118/119
 %   - Checks Z-level quantization (0.01 µm) and warns/rounds to nearest step
 
@@ -74,8 +75,33 @@ function startScanMapping(hWP)
         zStep_um          = 0.01;     % quantization step
         zMaxDeltaGuard   = 800;     % absolute guardrail (µm)
         zArriveTol_um    = 0.05;     % arrival tolerance (µm)
+        zTrackResyncWarn_um = 0.2;    % warn when tracked-vs-queried Z drifts
+        zMovePoll_s = 0.005;
+        zMoveTimeout_s = 5;
 
-        % ---- mask offset (single source of truth)
+        % ---- Z tracking + one-time startup safety anchor
+        maskZOffset_um = hWP.hMask.Position(3);
+        try
+            waitZaxis_fast(hWP.hSI, 'PollInterval', zMovePoll_s, 'Timeout', zMoveTimeout_s);
+            zTracked_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+        catch ME
+            error('Failed to initialize Z safety anchor: %s', ME.message);
+        end
+
+        [zFirstTarget_um, hasFirstTarget] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, hWP.Settings.ZTraversalMode, maskZOffset_um);
+        if hasFirstTarget
+            startupDelta = abs(zTracked_um - zFirstTarget_um);
+            if startupDelta >= zMaxDeltaGuard
+                warning('Refusing startup: current %.2f µm, first target %.2f µm (Δ=%.2f µm)', ...
+                    zTracked_um, zFirstTarget_um, startupDelta);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.status = "aborted_guardrail";
+                runLog.layers(end+1) = buildLayerRecord(0, 0, NaN, zFirstTarget_um, 0, NaN, 0, "z_guardrail_abort_startup", "Exceeded startup Z delta guard.", startupDelta); %#ok<AGROW>
+                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                finalizeRunLog(hWP, runLog);
+                return;
+            end
+        end
 
     % ============================================================
     % TILE LOOP
@@ -138,6 +164,42 @@ function startScanMapping(hWP)
                 error('Invalid ZTraversalMode.');
         end
         tilePaths = tilePaths(order);
+        firstLayerIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
+        if ~isempty(firstLayerIdx)
+            zFirstTileWorld = zLevels(firstLayerIdx) + maskZOffset_um;
+            try
+                zAnchor_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+            catch ME
+                warning('Tile %d first-layer safety query failed: %s', tileIdx, ME.message);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.status = "aborted_z_safety";
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, firstLayerIdx, zLevels(firstLayerIdx), zFirstTileWorld, 0, NaN, 0, "z_safety_query_failed", string(ME.message)); %#ok<AGROW>
+                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                finalizeRunLog(hWP, runLog);
+                return;
+            end
+
+            drift = abs(zAnchor_um - zTracked_um);
+            if drift > zTrackResyncWarn_um
+                warning('Tile %d: re-anchoring tracked Z by %.3f µm (tracked %.3f, queried %.3f).', ...
+                    tileIdx, drift, zTracked_um, zAnchor_um);
+                runLog.events(end+1) = buildEvent('z_track_resync', tileIdx, firstLayerIdx, ...
+                    sprintf('Resynced tracked Z by %.3f um (tracked %.3f -> queried %.3f).', drift, zTracked_um, zAnchor_um)); %#ok<AGROW>
+            end
+            zTracked_um = zAnchor_um;
+
+            zDeltaFirst = abs(zTracked_um - zFirstTileWorld);
+            if zDeltaFirst >= zMaxDeltaGuard
+                warning('Refusing Z move (tile %d first layer): current %.2f µm, target %.2f µm (Δ=%.2f µm)', ...
+                    tileIdx, zTracked_um, zFirstTileWorld, zDeltaFirst);
+                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
+                runLog.status = "aborted_guardrail";
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, firstLayerIdx, zLevels(firstLayerIdx), zFirstTileWorld, 0, NaN, 0, "z_guardrail_abort_first_layer", "Exceeded first-layer Z delta guard.", zDeltaFirst); %#ok<AGROW>
+                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                finalizeRunLog(hWP, runLog);
+                return;
+            end
+        end
 
         % ========================================================
         % Z LOOP
@@ -153,15 +215,14 @@ function startScanMapping(hWP)
 
             zLocal = zLevels(zIdx);
 
-            zWorld = zLocal + hWP.hMask.Position(3);
-            realZ  = hWP.hSI.hMotors.samplePosition(:,3);
-            zDelta = abs(realZ - zWorld);
+            zWorld = zLocal + maskZOffset_um;
+            zDelta = abs(zTracked_um - zWorld);
 
             
             % ---- guardrail
             if zDelta >= zMaxDeltaGuard
                 warning('Refusing Z move: current %.2f µm, target %.2f µm (Δ=%.2f µm)', ...
-                        realZ, zWorld, zDelta);
+                        zTracked_um, zWorld, zDelta);
                 runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
                 runLog.status = "aborted_guardrail";
                 runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, 0, NaN, 0, "z_guardrail_abort", "Exceeded Z delta guard.", zDelta); %#ok<AGROW>
@@ -175,20 +236,15 @@ function startScanMapping(hWP)
             moveStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             tic
             try
-                hWP.hSI.hMotors.moveSample([0 0 zWorld]);
-                try % plot on the figure
-                    plot(x_um, y_um, '-')
-                    xlim([-500,500]),ylim([-500,500])
-                    xlabel('x (μm)'),ylabel('y (μm)')
-                    axis equal
-                catch
-                    % do nothing
-                end
-                
-                while hWP.hSI.hMotors.moveInProgress
-                    pause(0.02);
-                end
-                
+                moveZaxis_fast(hWP.hSI, zWorld, ...
+                    'Type', 'absolute', ...
+                    'Frame', 'sample', ...
+                    'QueryBefore', false, ...
+                    'QueryAfter', false, ...
+                    'Blocking', true, ...
+                    'PollInterval', zMovePoll_s, ...
+                    'Timeout', zMoveTimeout_s);
+                zTracked_um = zWorld;
             catch ME
                 warning('Z move failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 moveErr = string(ME.message);
@@ -198,9 +254,21 @@ function startScanMapping(hWP)
             end
             moveElapsed = toc;
 
-            realZ2 = hWP.hSI.hMotors.samplePosition(:,3);
-            if abs(realZ2 - zWorld) > zArriveTol_um
-                warning('Z arrival off: got %.3f µm, wanted %.3f µm', realZ2, zWorld);
+            if ~isempty(firstLayerIdx) && zIdx == firstLayerIdx
+                try
+                    zAnchorAfter_um = getZaxis_fast(hWP.hSI, 'Frame', 'sample', 'Query', true);
+                    zArrivalErr = abs(zAnchorAfter_um - zWorld);
+                    zTracked_um = zAnchorAfter_um;
+                    if zArrivalErr > zArriveTol_um
+                        warning('Tile %d first-layer Z arrival off: got %.3f µm, wanted %.3f µm', ...
+                            tileIdx, zAnchorAfter_um, zWorld);
+                        runLog.events(end+1) = buildEvent('z_arrival_offset_first_layer', tileIdx, zIdx, ...
+                            sprintf('Arrival error %.3f um (got %.3f, wanted %.3f).', zArrivalErr, zAnchorAfter_um, zWorld)); %#ok<AGROW>
+                    end
+                catch ME
+                    warning('Tile %d first-layer arrival verification failed: %s', tileIdx, ME.message);
+                    runLog.events(end+1) = buildEvent('z_arrival_query_failed', tileIdx, zIdx, ME.message); %#ok<AGROW>
+                end
             end
 
             % ---- XY path (translate AFTER Z success)
@@ -287,6 +355,55 @@ function startScanMapping(hWP)
     end
 end
 
+
+% -------------------------------------------------------------------------
+function [zWorld, tf] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, zTraversalMode, maskZOffset_um)
+    zWorld = NaN;
+    tf = false;
+
+    for tileIdx = 1:numel(scanPaths)
+        tilePaths = scanPaths{tileIdx};
+        if isempty(tilePaths)
+            continue;
+        end
+        if isrow(tilePaths), tilePaths = tilePaths.'; end
+
+        if ~isprop(stack, 'ArbitraryZs') || tileIdx > numel(stack.ArbitraryZs) || isempty(stack.ArbitraryZs{tileIdx})
+            continue;
+        end
+        zLevels = stack.ArbitraryZs{tileIdx}(:);
+        if isempty(zLevels)
+            continue;
+        end
+
+        zLevels = round(zLevels / zStep_um) * zStep_um;
+        n = min(numel(tilePaths), numel(zLevels));
+        if n == 0
+            continue;
+        end
+        tilePaths = tilePaths(1:n);
+        zLevels = zLevels(1:n);
+
+        switch zTraversalMode
+            case "ascending"
+                [zLevels, order] = sort(zLevels, 'ascend');
+            case "descending"
+                [zLevels, order] = sort(zLevels, 'descend');
+            otherwise
+                error('Invalid ZTraversalMode.');
+        end
+        tilePaths = tilePaths(order);
+
+        firstIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
+        if isempty(firstIdx)
+            continue;
+        end
+
+        zWorld = zLevels(firstIdx) + maskZOffset_um;
+        tf = true;
+        return;
+    end
+end
 
 % -------------------------------------------------------------------------
 function [hX, hY] = getXYGalvos(hWP)
