@@ -20,6 +20,9 @@ function startScanMapping(hWP)
 
     % ---- time estimate for entire stack (your existing helper)
     figure
+    xlim([-500,500]),ylim([-500,500])
+    xlabel('x (μm)'),ylabel('y (μm)')
+    title('ScanPath')
     [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP);
     runLog = initRunLog(hWP, allTime_min, sliceTimes_min);
 
@@ -243,7 +246,7 @@ function startScanMapping(hWP)
                     'Frame', 'sample', ...
                     'QueryBefore', false, ...
                     'QueryAfter', false, ...
-                    'Blocking', true, ...
+                    'Blocking', false, ...
                     'PollInterval', zMovePoll_s, ...
                     'Timeout', zMoveTimeout_s);
                 if isfield(outZ, 'zAfter') && isfinite(outZ.zAfter)
@@ -294,6 +297,9 @@ function startScanMapping(hWP)
             
             x_um = scanPathXY(:,1);
             y_um = scanPathXY(:,2);
+
+            % ---- plot for visualization
+            plot(x_um,y_um,'-')
 
             % ---- bounds safety
             assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
