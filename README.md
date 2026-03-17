@@ -123,6 +123,9 @@ Integration notes:
 - Fast no-op path: for WP-wrapper calls in sample frame, if
   `hWP.hStage.Position(3)` already matches target and query flags are false,
   move command is skipped.
+- Scan anchoring: scanning performs startup anchor, tile-first-layer anchor, and
+  periodic/large-step re-anchors to keep tracked Z aligned while still using
+  fast non-query moves for most layers.
 
 Exact call:
 

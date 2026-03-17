@@ -78,6 +78,8 @@ function startScanMapping(hWP)
         zTrackResyncWarn_um = 0.2;    % warn when tracked-vs-queried Z drifts
         zMovePoll_s = 0.005;
         zMoveTimeout_s = 5;
+        zAnchorEveryLayers = 5;       % periodic safety re-anchor cadence (0 disables)
+        zAnchorDelta_um = 150;        % force anchor after large commanded Z step
 
         % ---- Z tracking + one-time startup safety anchor
         maskZOffset_um = hWP.hMask.Position(3);
@@ -166,6 +168,7 @@ function startScanMapping(hWP)
         end
         tilePaths = tilePaths(order);
         firstLayerIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
+        layersSinceAnchor = 0;
         if ~isempty(firstLayerIdx)
             zFirstTileWorld = zLevels(firstLayerIdx) + maskZOffset_um;
             try
@@ -189,6 +192,7 @@ function startScanMapping(hWP)
             end
             zTracked_um = zAnchor_um;
             syncStageZState(hWP, zTracked_um);
+            layersSinceAnchor = 0;
 
             zDeltaFirst = abs(zTracked_um - zFirstTileWorld);
             if zDeltaFirst >= zMaxDeltaGuard
@@ -261,20 +265,36 @@ function startScanMapping(hWP)
             end
             moveElapsed = toc;
 
+            layersSinceAnchor = layersSinceAnchor + 1;
+            doAnchor = false;
+            anchorReason = "periodic";
             if ~isempty(firstLayerIdx) && zIdx == firstLayerIdx
+                doAnchor = true;
+                anchorReason = "first_layer";
+            elseif zAnchorEveryLayers > 0 && layersSinceAnchor >= zAnchorEveryLayers
+                doAnchor = true;
+                anchorReason = "periodic";
+            elseif zDelta >= zAnchorDelta_um
+                doAnchor = true;
+                anchorReason = "large_step";
+            end
+
+            if doAnchor
                 try
                     zAnchorAfter_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
                     zArrivalErr = abs(zAnchorAfter_um - zWorld);
                     zTracked_um = zAnchorAfter_um;
                     syncStageZState(hWP, zTracked_um);
+                    layersSinceAnchor = 0;
                     if zArrivalErr > zArriveTol_um
-                        warning('Tile %d first-layer Z arrival off: got %.3f µm, wanted %.3f µm', ...
-                            tileIdx, zAnchorAfter_um, zWorld);
-                        runLog.events(end+1) = buildEvent('z_arrival_offset_first_layer', tileIdx, zIdx, ...
-                            sprintf('Arrival error %.3f um (got %.3f, wanted %.3f).', zArrivalErr, zAnchorAfter_um, zWorld)); %#ok<AGROW>
+                        warning('Tile %d Z %d arrival off (%s): got %.3f µm, wanted %.3f µm', ...
+                            tileIdx, zIdx, anchorReason, zAnchorAfter_um, zWorld);
+                        runLog.events(end+1) = buildEvent('z_arrival_offset', tileIdx, zIdx, ...
+                            sprintf('Arrival error %.3f um (reason=%s, got %.3f, wanted %.3f).', ...
+                            zArrivalErr, anchorReason, zAnchorAfter_um, zWorld)); %#ok<AGROW>
                     end
                 catch ME
-                    warning('Tile %d first-layer arrival verification failed: %s', tileIdx, ME.message);
+                    warning('Tile %d Z %d anchor query failed (%s): %s', tileIdx, zIdx, anchorReason, ME.message);
                     runLog.events(end+1) = buildEvent('z_arrival_query_failed', tileIdx, zIdx, ME.message); %#ok<AGROW>
                 end
             end

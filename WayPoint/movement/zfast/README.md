@@ -7,6 +7,7 @@ This module provides a Z-only motion API that reuses existing ScanImage objects 
 - WPv3 movement/scanning code calls `moveZaxis_fast(...)` directly.
 - `hWP.hStage.Position(3)` is synchronized from measured/tracked Z during stage moves and scan execution.
 - This keeps app state consistent without adding methods to `WP.mlapp`.
+- During scanning, WPv3 re-anchors Z at startup, first layer per tile, and periodic/large-step checkpoints.
 
 ## Sample vs Axes
 
