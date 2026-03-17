@@ -14,7 +14,7 @@ function out = moveZaxis_fast(hSI_or_hSICtl, zValue, varargin)
     p.FunctionName = 'moveZaxis_fast';
     addRequired(p, 'hSI_or_hSICtl');
     addRequired(p, 'zValue', @(x) isnumeric(x) && isscalar(x) && isreal(x) && isfinite(x));
-    addParameter(p, 'Type', 'relative', @(s) ischar(s) || isstring(s));
+    addParameter(p, 'Type', 'absolute', @(s) ischar(s) || isstring(s));
     addParameter(p, 'Frame', 'sample', @(s) ischar(s) || isstring(s));
     addParameter(p, 'QueryBefore', false, @isBoolLike);
     addParameter(p, 'QueryAfter', false, @isBoolLike);

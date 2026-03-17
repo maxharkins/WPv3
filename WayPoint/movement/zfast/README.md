@@ -22,7 +22,7 @@ out = moveZaxis_fast(hSI_or_hSICtl, zValue, ...
 
 ## Options and Defaults
 
-- `Type` (default: `'relative'`)
+- `Type` (default: `'absolute'`)
 - `Frame` (default: `'sample'`)
 - `QueryBefore` (default: `false`)
 - `QueryAfter` (default: `false`)
