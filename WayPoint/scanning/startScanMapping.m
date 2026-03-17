@@ -80,6 +80,7 @@ function startScanMapping(hWP)
         zMoveTimeout_s = 5;
         zAnchorEveryLayers = 5;       % periodic safety re-anchor cadence (0 disables)
         zAnchorDelta_um = 150;        % force anchor after large commanded Z step
+        [scanPathFig, scanPathAx] = ensureScanPathAxes([], []);
 
         % ---- Z tracking + one-time startup safety anchor
         maskZOffset_um = hWP.hMask.Position(3);
@@ -318,6 +319,17 @@ function startScanMapping(hWP)
             % ---- bounds safety
             assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
                 'Path exceeds ±500 µm bounds.');
+
+            % ---- live XY path (replace previous Z layer plot)
+            [scanPathFig, scanPathAx] = ensureScanPathAxes(scanPathFig, scanPathAx);
+            cla(scanPathAx);
+            plot(scanPathAx, x_um, y_um);
+            title(scanPathAx, 'ScanPath');
+            xlabel(scanPathAx, 'x (µm)');
+            ylabel(scanPathAx, 'y (µm)');
+            xlim(scanPathAx, [-500 500]);
+            ylim(scanPathAx, [-500 500]);
+            drawnow;
 
             % ---- time estimate
             totalLength_um = sum(hypot(diff(x_um), diff(y_um)));
@@ -606,6 +618,19 @@ function syncStageZState(hWP, z_um)
     catch
         % Non-fatal for scan execution.
     end
+end
+
+function [fig, ax] = ensureScanPathAxes(fig, ax)
+    if nargin < 1 || isempty(fig) || ~isgraphics(fig) || ...
+       nargin < 2 || isempty(ax) || ~isgraphics(ax, 'axes')
+        fig = figure('Name', 'ScanPath', 'NumberTitle', 'off');
+        ax = axes(fig);
+    end
+    title(ax, 'ScanPath');
+    xlabel(ax, 'x (µm)');
+    ylabel(ax, 'y (µm)');
+    xlim(ax, [-500 500]);
+    ylim(ax, [-500 500]);
 end
 
 function p = safeGetStagePath(hWP)
