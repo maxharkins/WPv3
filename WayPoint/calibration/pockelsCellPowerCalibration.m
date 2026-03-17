@@ -111,14 +111,18 @@ model = @(p, xData) p(1) .* sin(p(2) .* xData + p(3)).^2 + p(4);
 
 A0 = max(y) - min(y);   % full amplitude
 D0 = min(y);            % baseline (near 0)
-omega0 = pi / 100;      % fine for now
+omega0 = pi / 200;      % fine for now
 phi0 = 0;
 
 p0 = [A0 omega0 phi0 D0];
 
 try
     fitOpts = optimoptions('lsqcurvefit', 'Display', 'off');
-    p = lsqcurvefit(model, p0, x, y, [], [], fitOpts);
+    
+    lb = [0,          0,        -pi/8,   0];
+    ub = [10*max(y),  pi/100,    pi/8,   max(y)];
+    
+    p = lsqcurvefit(model, p0, x, y, lb, ub, fitOpts);
 catch
     % Fallback if Optimization Toolbox is unavailable.
     objective = @(pp) sum((model(pp, x) - y) .^ 2);
@@ -168,7 +172,7 @@ PockelsCalibration.pcPowerToObjectivePower = @(powerPC_W) powerPC_W ./ powerEffi
 PockelsCalibration.objectivePowerToPCPower = @(powerObj_W) powerObj_W .* powerEfficiency;
 
 PockelsCalibration.equations = struct( ...
-    'downstream_W', 'P_pc_W = A*sin(omega*Pct + phi) + D', ...
+    'downstream_W', 'P_pc_W = A*sin(omega*Pct + phi)^2 + D', ...
     'objective_W', 'P_obj_W = (A*sin(omega*Pct + phi) + D) / powerEfficiency', ...
     'objective_mW', 'P_obj_mW = 1000*(A*sin(omega*Pct + phi) + D)/powerEfficiency');
 
@@ -267,7 +271,7 @@ end
 end
 
 function power = percentToPowerModel(percent, A, omega, phi, D)
-power = A .* sin(omega .* percent + phi) + D;
+power = A .* sin(omega .* percent + phi).^2 + D;
 end
 
 function percent = powerToPercentModel(power, A, omega, phi, D)
@@ -278,8 +282,8 @@ if abs(omega) < eps
     error('Calibration omega is too small; inversion is ill-defined.');
 end
 
-Pmin = D - abs(A);
-Pmax = D + abs(A);
+Pmin = D;
+Pmax = D + A;
 tol = 1e-9;
 if any(power < (Pmin - tol) | power > (Pmax + tol))
     error('Requested power outside calibrated range [%.6g, %.6g] W.', Pmin, Pmax);
@@ -287,12 +291,12 @@ end
 
 power = power(:);
 percent = zeros(size(power));
-period = abs(2 * pi / omega);
+period = abs(pi / omega);
 
 for i = 1:numel(power)
     s = (power(i) - D) / A;
-    s = min(max(s, -1), 1); % clip asin domain
-    alpha = asin(s);
+    s = min(max(s, 0), 1);
+    alpha = asin(sqrt(s));
 
     b1 = (alpha - phi) / omega;
     b2 = (pi - alpha - phi) / omega;
@@ -340,7 +344,7 @@ end
 end
 
 function setPowerFractionSafe(hSI, pf)
-hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
+%hSI.hScan2D.hBeams{1}.setPowerFraction(pf);
 end
 
 function [outDir, baseStem] = resolveOutputPath(savePathOpt, saveDirOpt)

@@ -28,6 +28,11 @@ else
     cal = pockelsCellPowerCalibration(app.hSI, 'ShowPlot', true);
 end
 
+if ~isSinSquaredCalibration(cal)
+    error(['Loaded calibration is not sin^2-compatible. ' ...
+           'Run a fresh calibration with the updated sin^2 model.']);
+end
+
 app.Settings.PockelsCalibration = cal;
 if ~isempty(recentPath) && strcmpi(userChoice, "reuse")
     app.Settings.PockelsCalibrationPath = recentPath;
@@ -54,7 +59,7 @@ fprintf('[WP] Pockels calibration complete.\n');
 end
 
 function choice = askCalibrationChoice(app, recentPath, recentAgeMin)
-msg = sprintf(['A recent Pockels calibration was found.\n\n' ...
+msg = sprintf(['A recent sin^2 Pockels calibration was found.\n\n' ...
                'File: %s\nAge: %.1f minutes\n\n' ...
                'Reuse recent calibration or run a new calibration?'], recentPath, recentAgeMin);
 choice = "recalibrate";
@@ -123,6 +128,32 @@ if ~isfield(S, 'PockelsCalibration')
 end
 
 cal = S.PockelsCalibration;
+if ~isSinSquaredCalibration(cal)
+    fprintf('[WP] Ignoring legacy non-sin^2 calibration: %s\n', bestPath);
+    cal = [];
+    return;
+end
+
 matPath = bestPath;
 ageMin = minutes(datetime('now') - datetime(bestDnum, 'ConvertFrom', 'datenum'));
+end
+
+function tf = isSinSquaredCalibration(cal)
+tf = false;
+if ~isstruct(cal)
+    return;
+end
+
+if isfield(cal, 'modelType')
+    modelType = lower(strtrim(char(string(cal.modelType))));
+    if strcmp(modelType, 'sin2') || strcmp(modelType, 'sin^2')
+        tf = true;
+        return;
+    end
+end
+
+if isfield(cal, 'equations') && isstruct(cal.equations) && isfield(cal.equations, 'downstream_W')
+    eqDownstream = lower(strtrim(char(string(cal.equations.downstream_W))));
+    tf = contains(eqDownstream, 'sin(') && contains(eqDownstream, '^2');
+end
 end
