@@ -663,7 +663,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 return;
             end
 
-            % Bounding-box center in XY; shift Z so min Z = 0.
+            % Bounding-box center in XY.
             xyMin = min(coords_XYZ(:,1:2), [], 1);
             xyMax = max(coords_XYZ(:,1:2), [], 1);
             xyCenter = (xyMin + xyMax) / 2;
@@ -674,17 +674,16 @@ classdef Stacks < handle & matlab.mixin.SetGet
             coords_XYZ(:,3) = -coords_XYZ(:,3);
             segs(:,[3 6]) = -segs(:,[3 6]);
 
-            zMin = min(coords_XYZ(:,3));
-            coords_XYZ(:,3) = coords_XYZ(:,3) - zMin;
-            segs(:,[3 6]) = segs(:,[3 6]) - zMin;
+            % Keep raw imported Z levels as truth for G-code.
+            % Shift so deepest plane is at Z=0 and superficial planes are negative.
+            zMax = max(coords_XYZ(:,3));
+            coords_XYZ(:,3) = coords_XYZ(:,3) - zMax;
+            segs(:,[3 6]) = segs(:,[3 6]) - zMax;
 
-            qZ = app.Settings.QuantFactorZ_um;
-            if isempty(qZ) || ~isfinite(qZ) || qZ <= 0
-                qZ = 1;
-            end
-            segZ = round(segs(:,6) ./ qZ) .* qZ;
+            segZ = segs(:,6);
             zLevels = unique(segZ, 'sorted');
             zLevels = zLevels(:);
+            [~, zBin] = ismember(segZ, zLevels);
 
             if isempty(zLevels)
                 warning('No valid Z levels detected in %s', filename);
@@ -720,8 +719,8 @@ classdef Stacks < handle & matlab.mixin.SetGet
             end
 
             for i = 1:size(segs,1)
-                zIdx = find(abs(zLevels - segZ(i)) <= max(1e-9, qZ*0.5), 1, 'first');
-                if isempty(zIdx)
+                zIdx = zBin(i);
+                if zIdx == 0
                     continue;
                 end
 

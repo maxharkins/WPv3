@@ -16,8 +16,14 @@ if ~isempty(recentCal)
     userChoice = askCalibrationChoice(app, recentPath, recentAgeMin);
     switch userChoice
         case "reuse"
-            cal = recentCal;
-            fprintf('[WP] Reusing recent calibration: %s\n', recentPath);
+            [cal, selectedPath, selectedAgeMin, ok] = chooseCalibrationForReuse(app, recentPath, recentAgeMin);
+            if ~ok
+                fprintf('[WP] Calibration selection cancelled by user.\n');
+                return;
+            end
+            recentPath = selectedPath;
+            recentAgeMin = selectedAgeMin;
+            fprintf('[WP] Reusing selected calibration: %s\n', recentPath);
         case "recalibrate"
             cal = pockelsCellPowerCalibration(app.hSI, 'ShowPlot', true);
         otherwise
@@ -61,7 +67,7 @@ end
 function choice = askCalibrationChoice(app, recentPath, recentAgeMin)
 msg = sprintf(['A recent sin^2 Pockels calibration was found.\n\n' ...
                'File: %s\nAge: %.1f minutes\n\n' ...
-               'Reuse recent calibration or run a new calibration?'], recentPath, recentAgeMin);
+               'Choose a calibration file to reuse, or run a new calibration?'], recentPath, recentAgeMin);
 choice = "recalibrate";
 try
     btn = uiconfirm(app.UIFigure, msg, 'Pockels Calibration', ...
@@ -78,7 +84,7 @@ try
 catch
     % Fallback for environments without uiconfirm.
     fprintf('%s\n', msg);
-    ansStr = lower(strtrim(input('Type [r]euse, [n]ew, or [c]ancel: ', 's')));
+    ansStr = lower(strtrim(input('Type [r]euse (pick file), [n]ew, or [c]ancel: ', 's')));
     if startsWith(ansStr, 'r')
         choice = "reuse";
     elseif startsWith(ansStr, 'c')
@@ -87,6 +93,62 @@ catch
         choice = "recalibrate";
     end
 end
+end
+
+function [cal, matPath, ageMin, ok] = chooseCalibrationForReuse(app, defaultPath, defaultAgeMin)
+cal = [];
+matPath = '';
+ageMin = NaN;
+ok = false;
+
+[startDir, startFile] = fileparts(defaultPath);
+if isempty(startDir) || ~isfolder(startDir)
+    startDir = fullfile(pwd, 'calibration');
+end
+if isempty(startFile)
+    startFile = '*.mat';
+else
+    startFile = [startFile '.mat'];
+end
+
+while true
+    selectedPath = '';
+    try
+        [f, p] = uigetfile({'*.mat', 'MAT-files (*.mat)'}, ...
+            'Select Pockels calibration file', fullfile(startDir, startFile));
+        if isequal(f, 0) || isequal(p, 0)
+            return;
+        end
+        selectedPath = fullfile(p, f);
+    catch
+        typed = strtrim(input('Enter full path to calibration .mat file (blank cancels): ', 's'));
+        if isempty(typed)
+            return;
+        end
+        selectedPath = typed;
+    end
+
+    try
+        cal = loadCalibrationFromPath(selectedPath);
+        break;
+    catch ME
+        warnMsg = sprintf('Selected file is not a valid sin^2 calibration:\n%s\n\n%s', selectedPath, ME.message);
+        try
+            uialert(app.UIFigure, warnMsg, 'Invalid Calibration File');
+        catch
+            fprintf('[WP] %s\n', warnMsg);
+        end
+    end
+end
+
+matPath = selectedPath;
+try
+    d = dir(matPath);
+    ageMin = minutes(datetime('now') - datetime(d.datenum, 'ConvertFrom', 'datenum'));
+catch
+    ageMin = defaultAgeMin;
+end
+ok = true;
 end
 
 function [cal, matPath, ageMin] = tryLoadRecentCalibration()
@@ -122,20 +184,32 @@ if isempty(bestPath)
     return;
 end
 
-S = load(bestPath, 'PockelsCalibration');
-if ~isfield(S, 'PockelsCalibration')
-    return;
-end
-
-cal = S.PockelsCalibration;
-if ~isSinSquaredCalibration(cal)
-    fprintf('[WP] Ignoring legacy non-sin^2 calibration: %s\n', bestPath);
+try
+    cal = loadCalibrationFromPath(bestPath);
+catch ME
+    fprintf('[WP] Ignoring invalid recent calibration (%s): %s\n', bestPath, ME.message);
     cal = [];
     return;
 end
 
 matPath = bestPath;
 ageMin = minutes(datetime('now') - datetime(bestDnum, 'ConvertFrom', 'datenum'));
+end
+
+function cal = loadCalibrationFromPath(matPath)
+if ~isfile(matPath)
+    error('File does not exist.');
+end
+
+S = load(matPath, 'PockelsCalibration');
+if ~isfield(S, 'PockelsCalibration')
+    error('MAT file is missing "PockelsCalibration".');
+end
+
+cal = S.PockelsCalibration;
+if ~isSinSquaredCalibration(cal)
+    error('Calibration model is not sin^2-compatible.');
+end
 end
 
 function tf = isSinSquaredCalibration(cal)
