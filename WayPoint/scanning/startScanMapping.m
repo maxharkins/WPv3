@@ -152,10 +152,17 @@ function startScanMapping(hWP)
         % ---- scan paths for this tile
         tilePaths = scanPaths{tileIdx};
         if isrow(tilePaths), tilePaths = tilePaths.'; end
+        if isprop(stack, 'ScanMeta') && numel(stack.ScanMeta) >= tileIdx && ~isempty(stack.ScanMeta{tileIdx})
+            tileMeta = stack.ScanMeta{tileIdx};
+            if isrow(tileMeta), tileMeta = tileMeta.'; end
+        else
+            tileMeta = cell(numel(tilePaths), 1);
+        end
 
         % ---- enforce alignment
-        n = min(numel(tilePaths), numel(zLevels));
+        n = min([numel(tilePaths), numel(zLevels), numel(tileMeta)]);
         tilePaths = tilePaths(1:n);
+        tileMeta = tileMeta(1:n);
         zLevels   = zLevels(1:n);
 
         % ---- Z traversal order
@@ -168,6 +175,7 @@ function startScanMapping(hWP)
                 error('Invalid ZTraversalMode.');
         end
         tilePaths = tilePaths(order);
+        tileMeta = tileMeta(order);
         firstLayerIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
         layersSinceAnchor = 0;
         if ~isempty(firstLayerIdx)
@@ -297,24 +305,20 @@ function startScanMapping(hWP)
             end
 
             % ---- XY path (translate AFTER Z success)
-            scanPathXY = tilePaths{zIdx};
-            scanPathXY = unique(scanPathXY, 'rows', 'stable');
+            rawPath = tilePaths{zIdx};
+            layerMeta = tileMeta{zIdx};
+            chunks = buildPlaybackChunks(rawPath, layerMeta, zLocal, 1e-9);
+            scanMask = ~[chunks.isTravel];
+            scanChunks = chunks(scanMask);
 
-            if size(scanPathXY,1) < 2
+            if isempty(scanChunks)
                 fprintf('Tile %d Z %d: path too short, skipping.\n', tileIdx, zIdx);
                 runLog.counts.layersSkipped = runLog.counts.layersSkipped + 1;
-                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), NaN, 0, "path_too_short", "Path had fewer than two points.", zDelta); %#ok<AGROW>
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(rawPath,1), NaN, 0, "path_too_short", "No playable scan segments were found.", zDelta); %#ok<AGROW>
                 continue;
             end
-           
-            scanPathXY = rmmissing(scanPathXY,1); % remove NaN
-            
-            x_um = scanPathXY(:,1);
-            y_um = scanPathXY(:,2);
 
-            % ---- bounds safety
-            assert(all(abs(x_um)<=500 & abs(y_um)<=500), ...
-                'Path exceeds ±500 µm bounds.');
+            [x_um, y_um] = chunksToPlotXY(scanChunks);
 
             % ---- live XY path (replace previous Z layer plot)
             [scanPathFig, scanPathAx] = ensureScanPathAxes(scanPathFig, scanPathAx);
@@ -328,8 +332,14 @@ function startScanMapping(hWP)
             drawnow;
 
             % ---- time estimate
-            totalLength_um = sum(hypot(diff(x_um), diff(y_um)));
-            estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + leadS + tailS;
+            totalLength_um = 0;
+            for cIdx = 1:numel(chunks)
+                segXY = chunks(cIdx).xy;
+                assert(all(abs(segXY(:,1))<=500 & abs(segXY(:,2))<=500), ...
+                    'Path exceeds ±500 µm bounds.');
+                totalLength_um = totalLength_um + sum(hypot(diff(segXY(:,1)), diff(segXY(:,2))));
+            end
+            estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + numel(chunks) * (leadS + tailS);
 
             fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s\n', ...
                     tileIdx, zIdx, zWorld, estimatedTime_s);
@@ -339,24 +349,37 @@ function startScanMapping(hWP)
             status = "completed";
             errMsg = moveErr;
             try
-                playPreexistingPath(hX, hY, x_um, y_um, PDT_s, ...
-                    'BeamWaistDiameter_um', beamWaistDiameter_um, ...
-                    'BeamHandle', beam, ...
-                    'PowerFrac', Pf, ...
-                    'StartHold_s', leadS, ...
-                    'EndHold_s', tailS, ...
-                    'ParkWhenDone', false);
+                for cIdx = 1:numel(chunks)
+                    segXY = chunks(cIdx).xy;
+                    if size(segXY,1) < 2
+                        continue;
+                    end
+
+                    if chunks(cIdx).isTravel
+                        pfChunk = 0;
+                    else
+                        pfChunk = Pf;
+                    end
+
+                    playPreexistingPath(hX, hY, segXY(:,1), segXY(:,2), PDT_s, ...
+                        'BeamWaistDiameter_um', beamWaistDiameter_um, ...
+                        'BeamHandle', beam, ...
+                        'PowerFrac', pfChunk, ...
+                        'StartHold_s', leadS, ...
+                        'EndHold_s', tailS, ...
+                        'ParkWhenDone', false);
+                end
             catch ME
                 warning('Scan failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 status = "scan_failed";
                 errMsg = string(ME.message);
                 runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
-                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS')), moveElapsed); %#ok<AGROW>
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(rawPath,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS')), moveElapsed); %#ok<AGROW>
                 continue;
             end
             scanEnd = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             runLog.counts.layersCompleted = runLog.counts.layersCompleted + 1;
-            runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(scanPathXY,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, scanEnd, moveElapsed); %#ok<AGROW>
+            runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(rawPath,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, scanEnd, moveElapsed); %#ok<AGROW>
             
             drawnow % make sure pause updates
 
@@ -627,6 +650,23 @@ function [fig, ax] = ensureScanPathAxes(fig, ax)
     ylabel(ax, 'y (µm)');
     xlim(ax, [-500 500]);
     ylim(ax, [-500 500]);
+end
+
+function [xAll, yAll] = chunksToPlotXY(chunks)
+    xAll = [];
+    yAll = [];
+    for i = 1:numel(chunks)
+        segXY = chunks(i).xy;
+        if size(segXY,1) < 2
+            continue;
+        end
+        xAll = [xAll; segXY(:,1); nan]; %#ok<AGROW>
+        yAll = [yAll; segXY(:,2); nan]; %#ok<AGROW>
+    end
+    if ~isempty(xAll)
+        xAll(end) = [];
+        yAll(end) = [];
+    end
 end
 
 function p = safeGetStagePath(hWP)

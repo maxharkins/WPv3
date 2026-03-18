@@ -73,6 +73,7 @@ stack = hWP.hStacks;
 
 scanPaths = stack.ScanPaths(:);
 numTiles  = numel(scanPaths);
+hasMeta = isprop(stack, 'ScanMeta') && ~isempty(stack.ScanMeta);
 
 stagePath = hWP.aPath.Coordinates;
 
@@ -190,6 +191,12 @@ for tileIdx = 1:numTiles
     if isrow(tilePaths)
         tilePaths = tilePaths.';
     end
+    if hasMeta && numel(stack.ScanMeta) >= tileIdx && ~isempty(stack.ScanMeta{tileIdx})
+        tileMeta = stack.ScanMeta{tileIdx};
+        if isrow(tileMeta), tileMeta = tileMeta.'; end
+    else
+        tileMeta = cell(numel(tilePaths),1);
+    end
     
     if ~isprop(stack,'ArbitraryZs')
         error('Stack has no ArbitraryZs.')
@@ -203,9 +210,10 @@ for tileIdx = 1:numTiles
     
     zLevels = zLevels(:);
     
-    n = min(numel(tilePaths),numel(zLevels));
+    n = min([numel(tilePaths),numel(zLevels),numel(tileMeta)]);
     
     tilePaths = tilePaths(1:n);
+    tileMeta  = tileMeta(1:n);
     zLevels   = zLevels(1:n);
     
     % Match startScanMapping() Z traversal behavior.
@@ -218,6 +226,7 @@ for tileIdx = 1:numTiles
             error('Invalid ZTraversalMode.')
     end
     tilePaths = tilePaths(order);
+    tileMeta = tileMeta(order);
     
     %% --------------------------------------------------------
     % Z LOOP
@@ -230,23 +239,31 @@ for tileIdx = 1:numTiles
         if isempty(rawPathXY)
             continue
         end
-        
-        subPaths = splitPathByNaN(rawPathXY);
-        
-        if isempty(subPaths)
+
+        chunks = buildPlaybackChunks(rawPathXY, tileMeta{zIdx}, zLevels(zIdx), 1e-9);
+        if isempty(chunks)
+            continue
+        end
+        scanMask = ~[chunks.isTravel];
+        scanChunks = chunks(scanMask);
+        if isempty(scanChunks)
             continue
         end
         
         z = zLevels(zIdx) + hWP.hMask.Position(3);
 
         % Match startScanMapping() per-layer time estimate.
-        scanPathXY = unique(rawPathXY, 'rows', 'stable');
-        totalLength_um = sum(hypot(diff(scanPathXY(:,1)), diff(scanPathXY(:,2))), 'omitnan');
-        estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + leadS + tailS;
+        totalLength_um = 0;
+        for cIdx = 1:numel(chunks)
+            xy = chunks(cIdx).xy;
+            totalLength_um = totalLength_um + sum(hypot(diff(xy(:,1)), diff(xy(:,2))), 'omitnan');
+        end
+        estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + numel(chunks) * (leadS + tailS);
 
         fprintf('  Z %d  (%.2f µm) | %.3f s\n', zIdx, z, estimatedTime_s)
         
-        [xAll, yAll] = buildPlotPath(subPaths, OPT.PlotDecimation);
+        scanParts = arrayfun(@(c) c.xy, scanChunks, 'UniformOutput', false);
+        [xAll, yAll] = buildPlotPath(scanParts, OPT.PlotDecimation);
         if numel(xAll) < 2
             continue
         end
@@ -283,52 +300,6 @@ for tileIdx = 1:numTiles
 end
 
 disp('Visualization complete.')
-
-end
-
-
-%% ------------------------------------------------------------------------
-function parts = splitPathByNaN(pathXY)
-
-parts = {};
-
-if isempty(pathXY) || size(pathXY,2) < 2
-    return
-end
-
-isBreak = any(isnan(pathXY),2);
-
-startIdx = 1;
-
-for i = 1:size(pathXY,1)
-    
-    if isBreak(i)
-        
-        if i-1 >= startIdx
-            
-            seg = pathXY(startIdx:i-1,:);
-            
-            if size(seg,1) >= 2
-                parts{end+1,1} = seg; %#ok<AGROW>
-            end
-            
-        end
-        
-        startIdx = i+1;
-        
-    end
-    
-end
-
-if startIdx <= size(pathXY,1)
-    
-    seg = pathXY(startIdx:end,:);
-    
-    if size(seg,1) >= 2
-        parts{end+1,1} = seg;
-    end
-    
-end
 
 end
 

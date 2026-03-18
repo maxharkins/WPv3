@@ -14,6 +14,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         PowerBoxes % Cell array for each tile and z-level
         ArbitraryZs
         ScanPaths
+        ScanMeta   % Cell array mirroring ScanPaths; .isTravel mask per vertex
     end
     properties
         MeshEdgeLayers   % struct array from slicer
@@ -42,6 +43,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             obj.Power_pct         = app.Settings.Power_pct;
         
             obj.ScanPaths     = {};
+            obj.ScanMeta      = {};
             obj.PowerBoxes    = {};
             obj.ArbitraryZs   = {};
             obj.isMeshScan    = isMeshScan;
@@ -134,6 +136,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
             % IMPORTANT: wrap into a single tile to match legacy shape
             obj.ScanPaths   = {scanPath};   % {1 x 1} tile, tile{1} is {numZ x 1}
+            obj.ScanMeta    = {cell(numZ,1)};
             obj.ArbitraryZs = {zLevels};    % {1 x 1} tile, tile{1} is [numZ x 1]
         end
         function obj = applyMaskOffsetToScanPaths(obj)
@@ -186,6 +189,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % ------ Build replicated ScanPaths from the first Z-path of each tile ------
             numTiles = numel(obj.ScanPaths);
             newScanPaths = cell(numTiles,1);
+            newScanMeta  = cell(numTiles,1);
             newArbZs     = cell(numTiles,1);
         
             for tileIdx = 1:numTiles
@@ -201,6 +205,18 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
                 % Replicate the base path numCopies times (column cell)
                 newScanPaths{tileIdx} = repmat({basePath}, numCopies, 1);
+                if isprop(obj, 'ScanMeta') && numel(obj.ScanMeta) >= tileIdx && ~isempty(obj.ScanMeta{tileIdx})
+                    tileMeta = obj.ScanMeta{tileIdx};
+                    if isrow(tileMeta), tileMeta = tileMeta.'; end
+                    if ~isempty(tileMeta) && ~isempty(tileMeta{1})
+                        baseMeta = tileMeta{1};
+                    else
+                        baseMeta = zeros(size(basePath,1),1);
+                    end
+                else
+                    baseMeta = zeros(size(basePath,1),1);
+                end
+                newScanMeta{tileIdx} = repmat({baseMeta}, numCopies, 1);
         
                 % Establish base Z for this tile
                 baseZ = 0;
@@ -218,6 +234,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
             % ------ Assign (this mutates obj if it is a handle class) ------
             obj.ScanPaths   = newScanPaths;
+            obj.ScanMeta    = newScanMeta;
             obj.ArbitraryZs = newArbZs;
         
             % ------ Export (optional) ------
@@ -289,6 +306,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
             numTiles = numel(obj.PowerBoxes);
             obj.ScanPaths = cell(numTiles,1);
+            obj.ScanMeta = cell(numTiles,1);
         
             for tileIdx = 1:numTiles
                 tilePB = obj.PowerBoxes{tileIdx};
@@ -307,6 +325,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 end
         
                 obj.ScanPaths{tileIdx} = scanPath;
+                obj.ScanMeta{tileIdx} = cellfun(@(p) zeros(size(p,1),1), scanPath, 'UniformOutput', false);
             end
 
             % ==========================================================
@@ -439,8 +458,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
                         continue;
                     end
         
-                    % pathXY is N x 2; print as two columns (one vertex per line)
-                    fprintf(fid, '%f %f\n', pathXY.');
+                    % pathXY can be N x 2 (XY) or N x 3 (XYZ primitive).
+                    if size(pathXY,2) >= 3
+                        fprintf(fid, '%f %f %f\n', pathXY(:,1:3).');
+                    else
+                        fprintf(fid, '%f %f\n', pathXY(:,1:2).');
+                    end
                     fprintf(fid, '\n');
                 end
         
@@ -477,10 +500,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
             c = onCleanup(@() fclose(fid));
         
             scanPaths = {};
+            scanMeta  = {};
             allZs     = {};
             tileIdx   = 0;
         
             currentTile = {};
+            currentMeta = {};
             currentZs   = [];
             expectedNumZ = [];
         
@@ -494,7 +519,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     % Finalize previous tile
                     if ~isempty(currentTile)
                         if isrow(currentTile), currentTile = currentTile.'; end
+                        if isrow(currentMeta), currentMeta = currentMeta.'; end
                         scanPaths{tileIdx,1} = currentTile;
+                        if isempty(currentMeta)
+                            currentMeta = cellfun(@(p) zeros(size(p,1),1), currentTile, 'UniformOutput', false);
+                        end
+                        scanMeta{tileIdx,1} = currentMeta;
                         if ~isempty(currentZs)
                             allZs{tileIdx,1} = currentZs(:);
                         else
@@ -504,6 +534,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
                     tileIdx = tileIdx + 1;
                     currentTile = {};
+                    currentMeta = {};
                     currentZs   = [];
                     expectedNumZ = [];
         
@@ -512,6 +543,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     if ~isempty(nz) && isscalar(nz) && nz >= 0
                         expectedNumZ = nz;
                         currentTile  = cell(expectedNumZ,1);
+                        currentMeta  = cell(expectedNumZ,1);
                         currentZs    = nan(expectedNumZ,1);
                     end
         
@@ -524,6 +556,9 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     if isempty(expectedNumZ)
                         if numel(currentTile) < zIdx
                             currentTile{zIdx,1} = [];
+                        end
+                        if numel(currentMeta) < zIdx
+                            currentMeta{zIdx,1} = [];
                         end
                         if numel(currentZs) < zIdx
                             currentZs(zIdx,1) = NaN;
@@ -563,22 +598,41 @@ classdef Stacks < handle & matlab.mixin.SetGet
                         end
         
                         vals = sscanf(t,'%f');
-                        if numel(vals) ~= 2
+                        if numel(vals) ~= 2 && numel(vals) ~= 3
                             error('Malformed coordinate line: "%s"', t);
                         end
-        
-                        coords(end+1,:) = vals.'; %#ok<AGROW>
+
+                        if isempty(coords)
+                            coords = nan(0, numel(vals));
+                        elseif size(coords,2) ~= numel(vals)
+                            maxCols = max(size(coords,2), numel(vals));
+                            if maxCols > size(coords,2)
+                                coords(:,end+1:maxCols) = nan;
+                            end
+                        end
+                        row = nan(1, size(coords,2));
+                        row(1:numel(vals)) = vals.';
+                        coords(end+1,:) = row; %#ok<AGROW>
                         coordLine = fgetl(fid);
                     end
         
                     currentTile{zIdx,1} = coords;
+                    if ~isempty(coords) && size(coords,2) >= 3 && isfinite(currentZs(zIdx))
+                        currentMeta{zIdx,1} = abs(coords(:,3) - currentZs(zIdx)) > 1e-9;
+                    else
+                        currentMeta{zIdx,1} = zeros(size(coords,1),1);
+                    end
         
                     % Accumulate global XYZ
                     if ~isempty(coords)
-                        zval = currentZs(zIdx);
-                        if ~isnan(zval)
-                            coords_XYZ = [coords_XYZ; ...
-                                          coords, repmat(zval,size(coords,1),1)];
+                        if size(coords,2) >= 3
+                            coords_XYZ = [coords_XYZ; coords(:,1:3)]; %#ok<AGROW>
+                        else
+                            zval = currentZs(zIdx);
+                            if ~isnan(zval)
+                                coords_XYZ = [coords_XYZ; ...
+                                              coords(:,1:2), repmat(zval,size(coords,1),1)]; %#ok<AGROW>
+                            end
                         end
                     end
                 end
@@ -589,7 +643,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
             % Finalize last tile
             if ~isempty(currentTile)
                 if isrow(currentTile), currentTile = currentTile.'; end
+                if isrow(currentMeta), currentMeta = currentMeta.'; end
                 scanPaths{tileIdx,1} = currentTile;
+                if isempty(currentMeta)
+                    currentMeta = cellfun(@(p) zeros(size(p,1),1), currentTile, 'UniformOutput', false);
+                end
+                scanMeta{tileIdx,1} = currentMeta;
                 if ~isempty(currentZs)
                     allZs{tileIdx,1} = currentZs(:);
                 else
@@ -598,6 +657,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             end
         
             obj.ScanPaths   = scanPaths(:);
+            obj.ScanMeta    = scanMeta(:);
             obj.ArbitraryZs = allZs(:);
 
             
@@ -659,6 +719,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             if isempty(segs)
                 warning('No extrusion segments found in %s', filename);
                 obj.ScanPaths = {};
+                obj.ScanMeta = {};
                 obj.ArbitraryZs = {};
                 return;
             end
@@ -688,9 +749,16 @@ classdef Stacks < handle & matlab.mixin.SetGet
             if isempty(zLevels)
                 warning('No valid Z levels detected in %s', filename);
                 obj.ScanPaths = {};
+                obj.ScanMeta = {};
                 obj.ArbitraryZs = {};
                 return;
             end
+
+            % Deterministic Z-hop injection config (microns).
+            CFG.EnableZHop = true;
+            CFG.ZHop_um = 5;
+            CFG.MinJump_um = 1;
+            CFG.ForceDelimiter = true;
 
             fovSize = app.Settings.FOVSize_um;
             tileOverlap = app.Tile_Overlap_Edit_Field.Value;
@@ -712,9 +780,11 @@ classdef Stacks < handle & matlab.mixin.SetGet
             tol = 1e-9;
 
             scanPaths = cell(numTiles, 1);
+            scanMeta = cell(numTiles, 1);
             allZs = cell(numTiles, 1);
             for tileIdx = 1:numTiles
                 scanPaths{tileIdx} = cell(numZ, 1);
+                scanMeta{tileIdx} = cell(numZ, 1);
                 allZs{tileIdx} = zLevels;
             end
 
@@ -748,11 +818,20 @@ classdef Stacks < handle & matlab.mixin.SetGet
 
                     local0 = q0 - cxy;
                     local1 = q1 - cxy;
-                    scanPaths{tileIdx}{zIdx} = appendSegmentWithBreak(scanPaths{tileIdx}{zIdx}, local0, local1, tol);
+                    zVal = zLevels(zIdx);
+                    [scanPaths{tileIdx}{zIdx}, scanMeta{tileIdx}{zIdx}] = appendSegmentWithZHop( ...
+                        scanPaths{tileIdx}{zIdx}, ...
+                        scanMeta{tileIdx}{zIdx}, ...
+                        local0, ...
+                        local1, ...
+                        zVal, ...
+                        CFG, ...
+                        tol);
                 end
             end
 
             obj.ScanPaths = scanPaths;
+            obj.ScanMeta = scanMeta;
             obj.ArbitraryZs = allZs;
             obj.StagePath = stagePath;
 
@@ -837,9 +916,30 @@ classdef Stacks < handle & matlab.mixin.SetGet
     end
 end
 
-function path = appendSegmentWithBreak(path, p0, p1, tol)
-    if nargin < 4
+function [path, isTravel] = appendSegmentWithZHop(path, isTravel, p0, p1, zVal, CFG, tol)
+    if nargin < 7 || isempty(tol)
         tol = 1e-9;
+    end
+    if nargin < 6 || isempty(CFG)
+        CFG.EnableZHop = true;
+        CFG.ZHop_um = 5;
+        CFG.MinJump_um = 1;
+        CFG.ForceDelimiter = true;
+    end
+    if nargin < 2 || isempty(isTravel)
+        isTravel = zeros(0,1);
+    end
+    if nargin < 1 || isempty(path)
+        path = zeros(0,3);
+    end
+
+    if size(path,2) < 3 && ~isempty(path)
+        path(:,3) = zVal;
+    end
+    if numel(isTravel) ~= size(path,1)
+        isTravel = zeros(size(path,1),1);
+    else
+        isTravel = isTravel(:);
     end
 
     if norm(p1 - p0) <= tol
@@ -847,25 +947,67 @@ function path = appendSegmentWithBreak(path, p0, p1, tol)
     end
 
     if isempty(path)
-        path = [p0; p1];
+        seg = [p0, zVal; p1, zVal];
+        path = [path; seg];
+        isTravel = [isTravel; 0; 0];
         return;
     end
 
-    validRows = ~any(isnan(path), 2);
+    validRows = all(isfinite(path(:,1:3)), 2);
     lastIdx = find(validRows, 1, 'last');
     if isempty(lastIdx)
-        path = [p0; p1];
+        path = zeros(0,3);
+        isTravel = zeros(0,1);
+        seg = [p0, zVal; p1, zVal];
+        path = [path; seg];
+        isTravel = [isTravel; 0; 0];
         return;
     end
 
-    lastPt = path(lastIdx, :);
-    if norm(lastPt - p0) <= tol
-        if norm(lastPt - p1) > tol
-            path = [path; p1];
-        end
-    else
-        path = [path; nan nan; p0; p1];
+    lastXYZ = path(lastIdx,1:3);
+    lastXY = lastXYZ(1:2);
+
+    isBreak = isempty(path) || norm(p0 - lastXY) > CFG.MinJump_um;
+    if CFG.ForceDelimiter
+        isBreak = ~isempty(path);
     end
+
+    if CFG.EnableZHop && isBreak
+        zHop = zVal + CFG.ZHop_um;
+        hopSeq = [
+            lastXY, zVal;
+            lastXY, zHop;
+            p0,     zHop;
+            p0,     zVal
+        ];
+
+        if ~rowsMatchTail(path, hopSeq, tol)
+            path = [path; hopSeq];
+            isTravel = [isTravel; ones(size(hopSeq,1),1)];
+        end
+    end
+
+    seg = [
+        p0, zVal;
+        p1, zVal
+    ];
+
+    if ~rowsMatchTail(path, seg, tol)
+        path = [path; seg];
+        isTravel = [isTravel; 0; 0];
+    end
+end
+
+function tf = rowsMatchTail(path, seq, tol)
+    tf = false;
+    if isempty(path) || isempty(seq) || size(path,2) ~= size(seq,2)
+        return;
+    end
+    if size(path,1) < size(seq,1)
+        return;
+    end
+    tail = path(end-size(seq,1)+1:end, :);
+    tf = all(abs(tail(:) - seq(:)) <= tol);
 end
 
 function [tf, q0, q1] = clipSegmentToRect(p0, p1, rect)

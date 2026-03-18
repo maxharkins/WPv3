@@ -6,6 +6,7 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
     stack    = hWP.hStacks;
     scanPaths = stack.ScanPaths(:);          % enforce column
     numTiles = numel(scanPaths);
+    hasMeta = isprop(stack, 'ScanMeta') && ~isempty(stack.ScanMeta);
 
     % Match startScanMapping timing model.
     PDT_s = hWP.Settings.PixelDwellTime_ms / 1000;          % seconds
@@ -24,6 +25,12 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
         end
 
         if isrow(tilePaths), tilePaths = tilePaths.'; end
+        if hasMeta && numel(stack.ScanMeta) >= tileIdx && ~isempty(stack.ScanMeta{tileIdx})
+            tileMeta = stack.ScanMeta{tileIdx};
+            if isrow(tileMeta), tileMeta = tileMeta.'; end
+        else
+            tileMeta = cell(numel(tilePaths), 1);
+        end
 
         zLevels = stack.ArbitraryZs{tileIdx};
         if isempty(zLevels)
@@ -31,7 +38,7 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
         end
         zLevels = zLevels(:);
 
-        numZ = min(numel(tilePaths), numel(zLevels));
+        numZ = min([numel(tilePaths), numel(zLevels), numel(tileMeta)]);
         sliceTimes_min{tileIdx} = cell(numZ,1);
 
         tileTime_s = 0;
@@ -42,28 +49,29 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
                 continue
             end
 
-            subPaths = splitPathByNaN(pathXY);
-            if isempty(subPaths)
+            layerMeta = tileMeta{zIdx};
+            chunks = buildPlaybackChunks(pathXY, layerMeta, zLevels(zIdx), 1e-9);
+            if isempty(chunks)
                 continue
             end
 
             totalLen_um = 0;
-            numPlayableSubPaths = 0;
-            for pIdx = 1:numel(subPaths)
-                sp = unique(subPaths{pIdx}, 'rows', 'stable');
+            numPlayableChunks = 0;
+            for pIdx = 1:numel(chunks)
+                sp = chunks(pIdx).xy;
                 if size(sp,1) < 2
                     continue
                 end
                 totalLen_um = totalLen_um + sum(hypot(diff(sp(:,1)), diff(sp(:,2))));
-                numPlayableSubPaths = numPlayableSubPaths + 1;
+                numPlayableChunks = numPlayableChunks + 1;
             end
 
-            if totalLen_um <= 0 || numPlayableSubPaths == 0
+            if totalLen_um <= 0 || numPlayableChunks == 0
                 continue
             end
 
             estTime_s = (totalLen_um / rasterSpacing_um) * PDT_s + ...
-                        numPlayableSubPaths * (leadS + tailS);
+                        numPlayableChunks * (leadS + tailS);
 
             tileTime_s = tileTime_s + estTime_s;
             sliceTimes_min{tileIdx}{zIdx} = estTime_s / 60;
@@ -78,32 +86,4 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
     allTime_min = allTime_s / 60;
     fprintf('Estimated total time: %.3f min\n', allTime_min);
 
-end
-
-function parts = splitPathByNaN(pathXY)
-    parts = {};
-    if isempty(pathXY) || size(pathXY,2) < 2
-        return;
-    end
-
-    isBreak = any(isnan(pathXY), 2);
-    startIdx = 1;
-    for i = 1:size(pathXY,1)
-        if isBreak(i)
-            if i-1 >= startIdx
-                seg = pathXY(startIdx:i-1, :);
-                if size(seg,1) >= 2
-                    parts{end+1,1} = seg; %#ok<AGROW>
-                end
-            end
-            startIdx = i + 1;
-        end
-    end
-
-    if startIdx <= size(pathXY,1)
-        seg = pathXY(startIdx:end, :);
-        if size(seg,1) >= 2
-            parts{end+1,1} = seg; %#ok<AGROW>
-        end
-    end
 end
