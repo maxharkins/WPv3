@@ -85,6 +85,7 @@ leadS = 0.004;
 tailS = 0.002;
 
 estimateScanMapTime(hWP);
+printImportAndPlanSummaryForShow(hWP);
 
 %% ------------------------------------------------------------
 % Determine global bounds (absolute view)
@@ -117,10 +118,20 @@ for t = 1:numTiles
     
 end
 
-xmin = min(allX);
-xmax = max(allX);
-ymin = min(allY);
-ymax = max(allY);
+allX = allX(isfinite(allX));
+allY = allY(isfinite(allY));
+
+if isempty(allX) || isempty(allY)
+    xmin = -500;
+    xmax = 500;
+    ymin = -500;
+    ymax = 500;
+else
+    xmin = min(allX);
+    xmax = max(allX);
+    ymin = min(allY);
+    ymax = max(allY);
+end
 
 buf = OPT.Buffer_um;
 
@@ -260,7 +271,10 @@ for tileIdx = 1:numTiles
         end
         estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + numel(chunks) * (leadS + tailS);
 
-        fprintf('  Z %d  (%.2f µm) | %.3f s\n', zIdx, z, estimatedTime_s)
+        nTravel = sum([chunks.isTravel]);
+        nScan = numel(chunks) - nTravel;
+        fprintf('  Z %d  (%.2f µm) | %.3f s | chunks: total=%d scan=%d travel=%d\n', ...
+            zIdx, z, estimatedTime_s, numel(chunks), nScan, nTravel)
         
         scanParts = arrayfun(@(c) c.xy, scanChunks, 'UniformOutput', false);
         [xAll, yAll] = buildPlotPath(scanParts, OPT.PlotDecimation);
@@ -301,6 +315,138 @@ end
 
 disp('Visualization complete.')
 
+end
+
+function printImportAndPlanSummaryForShow(hWP)
+    stack = [];
+    try
+        stack = hWP.hStacks;
+    catch
+    end
+    if isempty(stack)
+        return;
+    end
+
+    if isprop(stack, 'LastImportStats') && isstruct(stack.LastImportStats) ...
+            && isfield(stack.LastImportStats, 'source') && strcmpi(stack.LastImportStats.source, 'gcode')
+        s = stack.LastImportStats;
+        fprintf('[Import Stats] source=%s | moves=%d | extrusion=%d | travel=%d | travel-hops=%d\n', ...
+            s.source, getStructInt(s, 'numMoves'), getStructInt(s, 'numExtrusionMoves'), ...
+            getStructInt(s, 'numTravelMoves'), getStructInt(s, 'numTravelHopMoves'));
+        fprintf('[Import Stats] length um: total=%.3f | extrusion=%.3f | travel=%.3f\n', ...
+            getStructNum(s, 'totalLength_um'), getStructNum(s, 'extrusionLength_um'), getStructNum(s, 'travelLength_um'));
+    end
+
+    plan = summarizePlaybackPlanForShow(hWP);
+    fprintf('[Show Plan] tiles=%d | layers=%d | chunks=%d (scan=%d, travel=%d)\n', ...
+        plan.tiles, plan.layers, plan.totalChunks, plan.scanChunks, plan.travelChunks);
+    fprintf('[Show Plan] length um: total=%.3f | scan=%.3f | travel=%.3f\n', ...
+        plan.totalLength_um, plan.scanLength_um, plan.travelLength_um);
+    fprintf('[Show Plan] estimate min: sample=%.3f | chunk-overhead=%.3f | total=%.3f\n', ...
+        plan.sampleTime_min, plan.overheadTime_min, plan.estimatedTotal_min);
+end
+
+function out = summarizePlaybackPlanForShow(hWP)
+    out = struct( ...
+        'tiles', 0, ...
+        'layers', 0, ...
+        'totalChunks', 0, ...
+        'scanChunks', 0, ...
+        'travelChunks', 0, ...
+        'totalLength_um', 0, ...
+        'scanLength_um', 0, ...
+        'travelLength_um', 0, ...
+        'sampleTime_min', 0, ...
+        'overheadTime_min', 0, ...
+        'estimatedTotal_min', 0);
+
+    stack = hWP.hStacks;
+    if isempty(stack) || ~isprop(stack, 'ScanPaths') || isempty(stack.ScanPaths)
+        return;
+    end
+
+    scanPaths = stack.ScanPaths(:);
+    out.tiles = numel(scanPaths);
+    hasMeta = isprop(stack, 'ScanMeta') && ~isempty(stack.ScanMeta);
+
+    PDT_s = hWP.Settings.PixelDwellTime_ms / 1000;
+    beamWaistDiameter_um = hWP.Settings.BeamWaistDiameter_um;
+    rasterSpacing_um = wpRasterSpacingFromBeamWaist(beamWaistDiameter_um);
+    leadS = 0.004;
+    tailS = 0.002;
+
+    for tileIdx = 1:numel(scanPaths)
+        tilePaths = scanPaths{tileIdx};
+        if isempty(tilePaths)
+            continue;
+        end
+        if isrow(tilePaths), tilePaths = tilePaths.'; end
+
+        if hasMeta && numel(stack.ScanMeta) >= tileIdx && ~isempty(stack.ScanMeta{tileIdx})
+            tileMeta = stack.ScanMeta{tileIdx};
+            if isrow(tileMeta), tileMeta = tileMeta.'; end
+        else
+            tileMeta = cell(numel(tilePaths), 1);
+        end
+
+        if ~isprop(stack, 'ArbitraryZs') || numel(stack.ArbitraryZs) < tileIdx || isempty(stack.ArbitraryZs{tileIdx})
+            zLevels = zeros(numel(tilePaths), 1);
+        else
+            zLevels = stack.ArbitraryZs{tileIdx};
+        end
+        zLevels = zLevels(:);
+
+        numZ = min([numel(tilePaths), numel(tileMeta), numel(zLevels)]);
+        for zIdx = 1:numZ
+            pathXY = tilePaths{zIdx};
+            if isempty(pathXY) || size(pathXY,1) < 2
+                continue;
+            end
+
+            chunks = buildPlaybackChunks(pathXY, tileMeta{zIdx}, zLevels(zIdx), 1e-9);
+            if isempty(chunks)
+                continue;
+            end
+
+            out.layers = out.layers + 1;
+            for cIdx = 1:numel(chunks)
+                seg = chunks(cIdx).xy;
+                if size(seg,1) < 2
+                    continue;
+                end
+                d = sum(hypot(diff(seg(:,1)), diff(seg(:,2))));
+                out.totalChunks = out.totalChunks + 1;
+                out.totalLength_um = out.totalLength_um + d;
+                if chunks(cIdx).isTravel
+                    out.travelChunks = out.travelChunks + 1;
+                    out.travelLength_um = out.travelLength_um + d;
+                else
+                    out.scanChunks = out.scanChunks + 1;
+                    out.scanLength_um = out.scanLength_um + d;
+                end
+            end
+        end
+    end
+
+    sampleTime_s = (out.totalLength_um / rasterSpacing_um) * PDT_s;
+    overhead_s = out.totalChunks * (leadS + tailS);
+    out.sampleTime_min = sampleTime_s / 60;
+    out.overheadTime_min = overhead_s / 60;
+    out.estimatedTotal_min = (sampleTime_s + overhead_s) / 60;
+end
+
+function n = getStructNum(s, field)
+    n = NaN;
+    if isfield(s, field) && isnumeric(s.(field)) && isscalar(s.(field)) && isfinite(s.(field))
+        n = double(s.(field));
+    end
+end
+
+function n = getStructInt(s, field)
+    n = 0;
+    if isfield(s, field) && isnumeric(s.(field)) && isscalar(s.(field)) && isfinite(s.(field))
+        n = round(double(s.(field)));
+    end
 end
 
 
