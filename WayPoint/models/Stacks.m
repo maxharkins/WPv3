@@ -15,6 +15,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
         ArbitraryZs
         ScanPaths
         ScanMeta   % Cell array mirroring ScanPaths; .isTravel mask per vertex
+        LastImportStats
     end
     properties
         MeshEdgeLayers   % struct array from slicer
@@ -46,6 +47,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
             obj.ScanMeta      = {};
             obj.PowerBoxes    = {};
             obj.ArbitraryZs   = {};
+            obj.LastImportStats = struct();
             obj.isMeshScan    = isMeshScan;
             obj.hWP           = app;
         end
@@ -267,6 +269,19 @@ classdef Stacks < handle & matlab.mixin.SetGet
         function obj = getScanPaths(obj, app)
             prepSequence(app)
             obj.isEffectively2D = false; % initialize
+
+            importedExt = "";
+            if isprop(app, 'Settings') && isstruct(app.Settings) && ...
+                    isfield(app.Settings, 'ImportedFilePath') && ~isempty(app.Settings.ImportedFilePath)
+                [~,~,ext] = fileparts(app.Settings.ImportedFilePath);
+                importedExt = string(lower(ext));
+            end
+            if any(importedExt == [".gcode", ".gco", ".nc"]) && hasAnyPlayableScanPaths(obj.ScanPaths)
+                fprintf('[Stacks] Using precomputed G-code scan paths from import (no regeneration).\n');
+                obj.dispStats();
+                return;
+            end
+
             if obj.isMeshScan
                 % ======================================================
                 % STL / Mesh workflow
@@ -713,38 +728,67 @@ classdef Stacks < handle & matlab.mixin.SetGet
             end
 
             g = parseGCodeFile(filename, 'AssumeMMIsMicrons', true);
-            segs = g.segments;
+            moves = g.moves;
+            moveIsTravel = g.moveIsTravel(:);
+            moveIsExtrusion = g.moveIsExtrusion(:);
             coords_XYZ = g.xyz;
 
-            if isempty(segs)
-                warning('No extrusion segments found in %s', filename);
+            if isempty(moves)
+                warning('No XY moves found in %s', filename);
                 obj.ScanPaths = {};
                 obj.ScanMeta = {};
                 obj.ArbitraryZs = {};
                 return;
             end
 
+            moveLen = hypot(moves(:,4) - moves(:,1), moves(:,5) - moves(:,2));
+            zDelta = abs(moves(:,6) - moves(:,3));
+            hopTol = 1e-9;
+            travelHopMask = moveIsTravel & (zDelta > hopTol);
+            obj.LastImportStats = struct( ...
+                'source', 'gcode', ...
+                'numMoves', size(moves,1), ...
+                'numExtrusionMoves', sum(moveIsExtrusion), ...
+                'numTravelMoves', sum(moveIsTravel), ...
+                'numTravelHopMoves', sum(travelHopMask), ...
+                'totalLength_um', sum(moveLen), ...
+                'extrusionLength_um', sum(moveLen(moveIsExtrusion)), ...
+                'travelLength_um', sum(moveLen(moveIsTravel)));
+            fprintf('[GCODE Import] moves=%d | extrusion=%d | travel=%d | travel-hops=%d\n', ...
+                obj.LastImportStats.numMoves, ...
+                obj.LastImportStats.numExtrusionMoves, ...
+                obj.LastImportStats.numTravelMoves, ...
+                obj.LastImportStats.numTravelHopMoves);
+            fprintf('[GCODE Import] length um: total=%.3f | extrusion=%.3f | travel=%.3f\n', ...
+                obj.LastImportStats.totalLength_um, ...
+                obj.LastImportStats.extrusionLength_um, ...
+                obj.LastImportStats.travelLength_um);
+
             % Bounding-box center in XY.
             xyMin = min(coords_XYZ(:,1:2), [], 1);
             xyMax = max(coords_XYZ(:,1:2), [], 1);
             xyCenter = (xyMin + xyMax) / 2;
             coords_XYZ(:,1:2) = coords_XYZ(:,1:2) - xyCenter;
-            segs(:,[1 2 4 5]) = segs(:,[1 2 4 5]) - repmat([xyCenter xyCenter], size(segs,1), 1);
+            moves(:,[1 2 4 5]) = moves(:,[1 2 4 5]) - repmat([xyCenter xyCenter], size(moves,1), 1);
 
             % G-code Z convention is opposite microscopy Z convention.
             coords_XYZ(:,3) = -coords_XYZ(:,3);
-            segs(:,[3 6]) = -segs(:,[3 6]);
+            moves(:,[3 6]) = -moves(:,[3 6]);
 
             % Keep raw imported Z levels as truth for G-code.
             % Shift so deepest plane is at Z=0 and superficial planes are negative.
             zMax = max(coords_XYZ(:,3));
             coords_XYZ(:,3) = coords_XYZ(:,3) - zMax;
-            segs(:,[3 6]) = segs(:,[3 6]) - zMax;
+            moves(:,[3 6]) = moves(:,[3 6]) - zMax;
 
-            segZ = segs(:,6);
-            zLevels = unique(segZ, 'sorted');
+            if any(moveIsExtrusion)
+                zLevels = unique(moves(moveIsExtrusion,6), 'sorted');
+            else
+                % Fallback if file has XY motion but no explicit extrusion semantics.
+                zLevels = unique(moves(:,6), 'sorted');
+            end
             zLevels = zLevels(:);
-            [~, zBin] = ismember(segZ, zLevels);
+            fprintf('[GCODE Import] extrusion Z levels: %d\n', numel(zLevels));
 
             if isempty(zLevels)
                 warning('No valid Z levels detected in %s', filename);
@@ -753,12 +797,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 obj.ArbitraryZs = {};
                 return;
             end
-
-            % Deterministic Z-hop injection config (microns).
-            CFG.EnableZHop = true;
-            CFG.ZHop_um = 5;
-            CFG.MinJump_um = 1;
-            CFG.ForceDelimiter = true;
 
             fovSize = app.Settings.FOVSize_um;
             tileOverlap = app.Tile_Overlap_Edit_Field.Value;
@@ -788,14 +826,20 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 allZs{tileIdx} = zLevels;
             end
 
-            for i = 1:size(segs,1)
-                zIdx = zBin(i);
-                if zIdx == 0
+            for i = 1:size(moves,1)
+                p0 = moves(i,1:2);
+                p1 = moves(i,4:5);
+                if norm(p1 - p0) <= tol
                     continue;
                 end
 
-                p0 = segs(i,1:2);
-                p1 = segs(i,4:5);
+                zRef = moves(i,6);
+                [~, zIdx] = min(abs(zLevels - zRef));
+                if isempty(zIdx) || ~isfinite(zRef)
+                    continue;
+                end
+                zVal = zLevels(zIdx);
+                isTravelMove = logical(moveIsTravel(i));
 
                 for tileIdx = 1:numTiles
                     cxy = stagePath(tileIdx,1:2);
@@ -818,14 +862,13 @@ classdef Stacks < handle & matlab.mixin.SetGet
 
                     local0 = q0 - cxy;
                     local1 = q1 - cxy;
-                    zVal = zLevels(zIdx);
-                    [scanPaths{tileIdx}{zIdx}, scanMeta{tileIdx}{zIdx}] = appendSegmentWithZHop( ...
+                    [scanPaths{tileIdx}{zIdx}, scanMeta{tileIdx}{zIdx}] = appendMoveToPath( ...
                         scanPaths{tileIdx}{zIdx}, ...
                         scanMeta{tileIdx}{zIdx}, ...
                         local0, ...
                         local1, ...
                         zVal, ...
-                        CFG, ...
+                        isTravelMove, ...
                         tol);
                 end
             end
@@ -916,15 +959,9 @@ classdef Stacks < handle & matlab.mixin.SetGet
     end
 end
 
-function [path, isTravel] = appendSegmentWithZHop(path, isTravel, p0, p1, zVal, CFG, tol)
+function [path, isTravel] = appendMoveToPath(path, isTravel, p0, p1, zVal, moveIsTravel, tol)
     if nargin < 7 || isempty(tol)
         tol = 1e-9;
-    end
-    if nargin < 6 || isempty(CFG)
-        CFG.EnableZHop = true;
-        CFG.ZHop_um = 5;
-        CFG.MinJump_um = 1;
-        CFG.ForceDelimiter = true;
     end
     if nargin < 2 || isempty(isTravel)
         isTravel = zeros(0,1);
@@ -946,68 +983,32 @@ function [path, isTravel] = appendSegmentWithZHop(path, isTravel, p0, p1, zVal, 
         return;
     end
 
-    if isempty(path)
-        seg = [p0, zVal; p1, zVal];
-        path = [path; seg];
-        isTravel = [isTravel; 0; 0];
-        return;
-    end
-
     validRows = all(isfinite(path(:,1:3)), 2);
-    lastIdx = find(validRows, 1, 'last');
-    if isempty(lastIdx)
-        path = zeros(0,3);
-        isTravel = zeros(0,1);
-        seg = [p0, zVal; p1, zVal];
-        path = [path; seg];
-        isTravel = [isTravel; 0; 0];
-        return;
-    end
-
-    lastXYZ = path(lastIdx,1:3);
-    lastXY = lastXYZ(1:2);
-
-    isBreak = isempty(path) || norm(p0 - lastXY) > CFG.MinJump_um;
-    if CFG.ForceDelimiter
-        isBreak = ~isempty(path);
-    end
-
-    if CFG.EnableZHop && isBreak
-        zHop = zVal + CFG.ZHop_um;
-        hopSeq = [
-            lastXY, zVal;
-            lastXY, zHop;
-            p0,     zHop;
-            p0,     zVal
-        ];
-
-        if ~rowsMatchTail(path, hopSeq, tol)
-            path = [path; hopSeq];
-            isTravel = [isTravel; ones(size(hopSeq,1),1)];
+    if any(validRows)
+        lastIdx = find(validRows, 1, 'last');
+        lastXY = path(lastIdx,1:2);
+        if norm(lastXY - p0) > tol
+            path = [path; nan(1,3)];
+            isTravel = [isTravel; 1];
         end
     end
 
-    seg = [
-        p0, zVal;
-        p1, zVal
-    ];
+    seg = [p0, zVal; p1, zVal];
+    segTravel = repmat(logical(moveIsTravel), size(seg,1), 1);
 
-    if ~rowsMatchTail(path, seg, tol)
+    validRows = all(isfinite(path(:,1:3)), 2);
+    if any(validRows)
+        lastIdx = find(validRows, 1, 'last');
+        if all(abs(path(lastIdx,:) - seg(1,:)) <= tol)
+            seg = seg(2:end,:);
+            segTravel = segTravel(2:end,:);
+        end
+    end
+
+    if ~isempty(seg)
         path = [path; seg];
-        isTravel = [isTravel; 0; 0];
+        isTravel = [isTravel; segTravel];
     end
-end
-
-function tf = rowsMatchTail(path, seq, tol)
-    tf = false;
-    if isempty(path) || isempty(seq) || size(path,2) ~= size(seq,2)
-        return;
-    end
-    if size(path,1) < size(seq,1)
-        return;
-    end
-    tail = path(end-size(seq,1)+1:end, :);
-    tf = all(abs(tail(:) - seq(:)) <= tol);
 end
 
 function [tf, q0, q1] = clipSegmentToRect(p0, p1, rect)
@@ -1064,4 +1065,24 @@ end
 
 function rectOut = intersectRects(a, b)
     rectOut = [max(a(1), b(1)), min(a(2), b(2)), max(a(3), b(3)), min(a(4), b(4))];
+end
+
+function tf = hasAnyPlayableScanPaths(scanPaths)
+    tf = false;
+    if isempty(scanPaths)
+        return;
+    end
+    for t = 1:numel(scanPaths)
+        tile = scanPaths{t};
+        if isempty(tile) || ~iscell(tile)
+            continue;
+        end
+        for z = 1:numel(tile)
+            p = tile{z};
+            if ~isempty(p) && size(p,1) >= 2 && size(p,2) >= 2
+                tf = true;
+                return;
+            end
+        end
+    end
 end

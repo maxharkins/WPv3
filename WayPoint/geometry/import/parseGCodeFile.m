@@ -1,5 +1,8 @@
 function data = parseGCodeFile(filePath, varargin)
-% parseGCodeFile  Parse common G-code dialects into extrusion segments.
+% parseGCodeFile  Parse common G-code dialects into ordered XY moves.
+% Returns both:
+%   - extrusion-only segments
+%   - full ordered XY moves with travel/extrusion labels
 % Output units are microns.
 
     p = inputParser;
@@ -28,6 +31,10 @@ function data = parseGCodeFile(filePath, varargin)
     segChunk = 50000;
     segs = zeros(segChunk, 6); % [x0 y0 z0 x1 y1 z1]
     nSeg = 0;
+    moves = zeros(segChunk, 6); % [x0 y0 z0 x1 y1 z1]
+    moveIsTravel = false(segChunk, 1);
+    moveIsExtrusion = false(segChunk, 1);
+    nMove = 0;
 
     line = fgetl(fid);
     while ischar(line)
@@ -54,13 +61,24 @@ function data = parseGCodeFile(filePath, varargin)
                         case 92 % set position
                             state = applyG92(state, words);
                         case {0, 1} % linear move
-                            [state, seg] = applyLinearMove(state, words, cmdNum);
-                            if ~isempty(seg)
+                            [state, move, isTravelMove, isExtrusionMove] = applyLinearMove(state, words, cmdNum);
+                            if ~isempty(move)
+                                nMove = nMove + 1;
+                                if nMove > size(moves,1)
+                                    moves(end+segChunk, :) = 0;
+                                    moveIsTravel(end+segChunk, 1) = false;
+                                    moveIsExtrusion(end+segChunk, 1) = false;
+                                end
+                                moves(nMove, :) = move;
+                                moveIsTravel(nMove) = logical(isTravelMove);
+                                moveIsExtrusion(nMove) = logical(isExtrusionMove);
+                            end
+                            if isExtrusionMove
                                 nSeg = nSeg + 1;
                                 if nSeg > size(segs,1)
                                     segs(end+segChunk, :) = 0;
                                 end
-                                segs(nSeg, :) = seg;
+                                segs(nSeg, :) = move;
                             end
                         otherwise
                             % Ignore unsupported G-codes for now (e.g., arcs).
@@ -87,14 +105,31 @@ function data = parseGCodeFile(filePath, varargin)
         line = fgetl(fid);
     end
 
-    if nSeg == 0
-        data = struct('segments', zeros(0,6), 'xyz', zeros(0,3));
+    if nMove == 0
+        data = struct( ...
+            'segments', zeros(0,6), ...
+            'moves', zeros(0,6), ...
+            'moveIsTravel', false(0,1), ...
+            'moveIsExtrusion', false(0,1), ...
+            'xyz', zeros(0,3));
         return;
     end
 
-    segs = segs(1:nSeg, :);
-    xyz = [segs(:,1:3); segs(:,4:6)];
-    data = struct('segments', segs, 'xyz', xyz);
+    if nSeg == 0
+        segs = zeros(0,6);
+    else
+        segs = segs(1:nSeg, :);
+    end
+    moves = moves(1:nMove, :);
+    moveIsTravel = moveIsTravel(1:nMove);
+    moveIsExtrusion = moveIsExtrusion(1:nMove);
+    xyz = [moves(:,1:3); moves(:,4:6)];
+    data = struct( ...
+        'segments', segs, ...
+        'moves', moves, ...
+        'moveIsTravel', moveIsTravel, ...
+        'moveIsExtrusion', moveIsExtrusion, ...
+        'xyz', xyz);
 end
 
 function s = stripCommentsFast(line)
@@ -245,7 +280,7 @@ function state = applyG92(state, words)
     if ~isnan(words.E), state.e = words.E * state.unitsToMicrons; end
 end
 
-function [state, seg] = applyLinearMove(state, words, gNum)
+function [state, move, isTravelMove, isExtrusionMove] = applyLinearMove(state, words, gNum)
     startPos = state.pos;
     startE   = state.e;
 
@@ -280,11 +315,12 @@ function [state, seg] = applyLinearMove(state, words, gNum)
     isExtrusionMove = (dXY > 0) && ...
                       ((hasE && dE > 0 && gNum ~= 0) || ...
                        (state.extruderOn && gNum ~= 0));
+    isTravelMove = (dXY > 0) && ~isExtrusionMove;
 
-    if isExtrusionMove
-        seg = [startPos, targetPos];
+    if dXY > 0
+        move = [startPos, targetPos];
     else
-        seg = [];
+        move = [];
     end
 
     state.pos = targetPos;
