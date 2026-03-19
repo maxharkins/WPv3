@@ -350,6 +350,7 @@ function startScanMapping(hWP)
             status = "completed";
             errMsg = moveErr;
             try
+                fprintf("Num chunk: %d\n",numel(chunks))
                 for cIdx = 1:numel(chunks)
                     segXY = chunks(cIdx).xy;
                     if size(segXY,1) < 2
