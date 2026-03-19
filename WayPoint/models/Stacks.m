@@ -999,7 +999,13 @@ function [path, isTravel] = appendMoveToPath(path, isTravel, p0, p1, zVal, moveI
     validRows = all(isfinite(path(:,1:3)), 2);
     if any(validRows)
         lastIdx = find(validRows, 1, 'last');
-        if all(abs(path(lastIdx,:) - seg(1,:)) <= tol)
+        sameStart = all(abs(path(lastIdx,:) - seg(1,:)) <= tol);
+        prevTravel = logical(isTravel(lastIdx));
+        currTravel = logical(moveIsTravel);
+        % Only collapse duplicate junction points when the segment type
+        % (travel vs scan) is unchanged. Keep duplicates across type
+        % changes so buildPlaybackChunks can preserve boundaries.
+        if sameStart && (prevTravel == currTravel)
             seg = seg(2:end,:);
             segTravel = segTravel(2:end,:);
         end
