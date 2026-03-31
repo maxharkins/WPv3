@@ -9,8 +9,7 @@ function startScanMapping(hWP)
 %   - Correct scan-time estimate consistent with playPreexistingPath resampling
 %   - Resolves power from either hWP.Settings.Power_pct or Power_mW
 %     (with Pockels calibration) and maps to PowerFrac robustly
-%   - Safer Z motion with zfast: track Z in software, anchor-query at startup
-%     and first layer of each tile, then move without per-layer queries
+%   - Z moves use moveSampleNoQuery and software-tracked stage Z (no anchoring)
 %   - (Optional) Finds X/Y galvo resources by name, with fallback to indices 118/119
 %   - Checks Z-level quantization (0.01 µm) and warns/rounds to nearest step
 
@@ -75,23 +74,15 @@ function startScanMapping(hWP)
         % ---- Z constraints
         zStep_um          = 0.01;     % quantization step
         zMaxDeltaGuard   = 800;     % absolute guardrail (µm)
-        zArriveTol_um    = 0.05;     % arrival tolerance (µm)
-        zTrackResyncWarn_um = 0.2;    % warn when tracked-vs-queried Z drifts
-        zMovePoll_s = 0.005;
-        zMoveTimeout_s = 5;
-        zAnchorEveryLayers = 5;       % periodic safety re-anchor cadence (0 disables)
-        zAnchorDelta_um = 150;        % force anchor after large commanded Z step
         [scanPathFig, scanPathAx] = ensureScanPathAxes([], []);
 
-        % ---- Z tracking + one-time startup safety anchor
+        % ---- Z tracking (no hardware query anchoring)
         maskZOffset_um = hWP.hMask.Position(3);
-        try
-            waitZaxis_fast(hWP, 'PollInterval', zMovePoll_s, 'Timeout', zMoveTimeout_s);
-            zTracked_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
-            syncStageZState(hWP, zTracked_um);
-        catch ME
-            error('Failed to initialize Z safety anchor: %s', ME.message);
+        zTracked_um = resolveTrackedStageZ(hWP);
+        if ~isfinite(zTracked_um)
+            error('Failed to initialize tracked Z from current stage state.');
         end
+        syncStageZState(hWP, zTracked_um);
 
         [zFirstTarget_um, hasFirstTarget] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, hWP.Settings.ZTraversalMode, maskZOffset_um);
         if hasFirstTarget
@@ -177,46 +168,6 @@ function startScanMapping(hWP)
         end
         tilePaths = tilePaths(order);
         tileMeta = tileMeta(order);
-        firstLayerIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
-        layersSinceAnchor = 0;
-        if ~isempty(firstLayerIdx)
-            zFirstTileWorld = zLevels(firstLayerIdx) + maskZOffset_um;
-            try
-                zAnchor_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
-            catch ME
-                warning('Tile %d first-layer safety query failed: %s', tileIdx, ME.message);
-                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
-                runLog.status = "aborted_z_safety";
-                runLog.layers(end+1) = buildLayerRecord(tileIdx, firstLayerIdx, zLevels(firstLayerIdx), zFirstTileWorld, 0, NaN, 0, "z_safety_query_failed", string(ME.message)); %#ok<AGROW>
-                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
-                finalizeRunLog(hWP, runLog);
-                return;
-            end
-
-            drift = abs(zAnchor_um - zTracked_um);
-            if drift > zTrackResyncWarn_um
-                warning('Tile %d: re-anchoring tracked Z by %.3f µm (tracked %.3f, queried %.3f).', ...
-                    tileIdx, drift, zTracked_um, zAnchor_um);
-                runLog.events(end+1) = buildEvent('z_track_resync', tileIdx, firstLayerIdx, ...
-                    sprintf('Resynced tracked Z by %.3f um (tracked %.3f -> queried %.3f).', drift, zTracked_um, zAnchor_um)); %#ok<AGROW>
-            end
-            zTracked_um = zAnchor_um;
-            syncStageZState(hWP, zTracked_um);
-            layersSinceAnchor = 0;
-
-            zDeltaFirst = abs(zTracked_um - zFirstTileWorld);
-            if zDeltaFirst >= zMaxDeltaGuard
-                warning('Refusing Z move (tile %d first layer): current %.2f µm, target %.2f µm (Δ=%.2f µm)', ...
-                    tileIdx, zTracked_um, zFirstTileWorld, zDeltaFirst);
-                runLog.counts.layersFailed = runLog.counts.layersFailed + 1;
-                runLog.status = "aborted_guardrail";
-                runLog.layers(end+1) = buildLayerRecord(tileIdx, firstLayerIdx, zLevels(firstLayerIdx), zFirstTileWorld, 0, NaN, 0, "z_guardrail_abort_first_layer", "Exceeded first-layer Z delta guard.", zDeltaFirst); %#ok<AGROW>
-                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
-                finalizeRunLog(hWP, runLog);
-                return;
-            end
-        end
-
         % ========================================================
         % Z LOOP
         % ========================================================
@@ -252,8 +203,7 @@ function startScanMapping(hWP)
             moveStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             tic
             try
-                disp(zWorld)
-                hSI.hMotors.moveSampleNoQuery([NaN,NaN,],true)
+                hWP.hSI.hMotors.moveSampleNoQuery([NaN, NaN, zWorld], true);
             catch ME
                 warning('Z move failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 moveErr = string(ME.message);
@@ -262,40 +212,8 @@ function startScanMapping(hWP)
                 continue;
             end
             moveElapsed = toc;
-
-            layersSinceAnchor = layersSinceAnchor + 1;
-            doAnchor = false;
-            anchorReason = "periodic";
-            if ~isempty(firstLayerIdx) && zIdx == firstLayerIdx
-                doAnchor = true;
-                anchorReason = "first_layer";
-            elseif zAnchorEveryLayers > 0 && layersSinceAnchor >= zAnchorEveryLayers
-                doAnchor = true;
-                anchorReason = "periodic";
-            elseif zDelta >= zAnchorDelta_um
-                doAnchor = true;
-                anchorReason = "large_step";
-            end
-
-            if doAnchor
-                try
-                    zAnchorAfter_um = getZaxis_fast(hWP, 'Frame', 'sample', 'Query', true);
-                    zArrivalErr = abs(zAnchorAfter_um - zWorld);
-                    zTracked_um = zAnchorAfter_um;
-                    syncStageZState(hWP, zTracked_um);
-                    layersSinceAnchor = 0;
-                    if zArrivalErr > zArriveTol_um
-                        warning('Tile %d Z %d arrival off (%s): got %.3f µm, wanted %.3f µm', ...
-                            tileIdx, zIdx, anchorReason, zAnchorAfter_um, zWorld);
-                        runLog.events(end+1) = buildEvent('z_arrival_offset', tileIdx, zIdx, ...
-                            sprintf('Arrival error %.3f um (reason=%s, got %.3f, wanted %.3f).', ...
-                            zArrivalErr, anchorReason, zAnchorAfter_um, zWorld)); %#ok<AGROW>
-                    end
-                catch ME
-                    warning('Tile %d Z %d anchor query failed (%s): %s', tileIdx, zIdx, anchorReason, ME.message);
-                    runLog.events(end+1) = buildEvent('z_arrival_query_failed', tileIdx, zIdx, ME.message); %#ok<AGROW>
-                end
-            end
+            zTracked_um = zWorld;
+            syncStageZState(hWP, zTracked_um);
 
             % ---- XY path (translate AFTER Z success)
             rawPath = tilePaths{zIdx};
@@ -614,6 +532,27 @@ function p = safeGetMaskPos(hWP)
     p = [NaN NaN NaN];
     try
         p = hWP.hMask.Position;
+    catch
+    end
+end
+
+function z_um = resolveTrackedStageZ(hWP)
+    z_um = NaN;
+    try
+        if isprop(hWP, 'hStage') && ~isempty(hWP.hStage)
+            pos = hWP.hStage.Position;
+            if isnumeric(pos) && numel(pos) >= 3 && isfinite(pos(3))
+                z_um = double(pos(3));
+                return;
+            end
+        end
+    catch
+    end
+    try
+        pos = hWP.hSI.hMotors.samplePosition;
+        if isnumeric(pos) && numel(pos) >= 3 && isfinite(pos(3))
+            z_um = double(pos(3));
+        end
     catch
     end
 end
