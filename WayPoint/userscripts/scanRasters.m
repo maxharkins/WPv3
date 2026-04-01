@@ -1,46 +1,60 @@
 
 % strip config
-center = [0,0]; % µm
+center = [0,100]; % µm
 width = 100; % µm
 height = 10; % µm
 spacing = 0.39; % µm
 orientation = 'horizontal';
-PDT_s = 0.5e-3; % seconds
+PDT_s = 1e-3; % seconds
 
 beamWaistDiameter_um = 0.80; % µm
 beam = hWP.hSI.hScan2D.hBeams{1}; % beam handle
 [hX, hY] = getXYGalvos(hWP); % get galvo handles
 
-leadS = 0.004; % s 
-tailS = 0.002; % s
+leadS = 0; % s 
+tailS = 0; % s
 
-Pf = 1;
+Pf = .5;
 
 % Z config
-zs = 200:10:0; % µm
+zs = 50:-10:30; % µm
 
+% image config
+save_dir = "C:\Users\SCIENTIFICA\Box\Zhang&Brown\Experiments\2026\2026-03-31_surface-ablations\raw";
+prefix = 'exp_003';
 
-
-
-
+%% end of config
 
 [x_um, y_um] = generateRasterStrip( ...
     center, width, height, spacing, orientation ...
     );
 
+%convert to play paths
+xy = [x_um(:),y_um(:)];
+keep = [true; hypot(diff(xy(:,1)), diff(xy(:,2))) > 0];
+xy = xy(keep,:);
 
+x_play = xy(:,1);
+y_play = xy(:,2);
+
+
+figure
 plot(x_um, y_um, '-')
 xlim([-500, 500]),ylim([-500,500])
 axis equal
+pause(1)
+disp('starting...')
 
 
-for z = zs
+for zIdx = 1:numel(zs)
+    z = zs(zIdx);
+    fprintf('starting #%d\n', zIdx)
     hWP.hSI.hMotors.moveSampleNoQuery([NaN, NaN, z], true); % move z
     
     pause(0.5)
 
     playPreexistingPath(hX, hY, ...
-         x_um(:,1), y_um(:,2), ...
+         x_play, y_play, ...
          PDT_s, ...
         'BeamWaistDiameter_um', beamWaistDiameter_um, ...
         'BeamHandle', beam, ...
@@ -49,26 +63,17 @@ for z = zs
         'EndHold_s', tailS, ...
         'ParkWhenDone', false);
 
+    pause(0.5)
 
+    grab_and_save_with_metadata(save_dir, 'Prefix', prefix);
+
+    pause(0.5)
 
 end
 
 
 
 
-
-
-playPreexistingPath(hX, hY, segXY(:,1), segXY(:,2), PDT_s, ...
-                        'BeamWaistDiameter_um', beamWaistDiameter_um, ...
-                        'BeamHandle', beam, ...
-                        'PowerFrac', pfChunk, ...
-                        'StartHold_s', leadS, ...
-                        'EndHold_s', tailS, ...
-                        'ParkWhenDone', false);
-
-
-%% loop
-for 
 
 function [x_um, y_um] = generateRasterStrip(center, width, height, spacing, orientation)
 % Generate continuous snaking raster path centered at (0,0) or given center
