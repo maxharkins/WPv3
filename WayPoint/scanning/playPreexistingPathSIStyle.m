@@ -162,18 +162,18 @@ end
 
 [path_FOV, ~] = ss.scanPathStimulusFOV(sf, 0, 0, 0, false, strcmp(beamMode, 'synced_ao'), inf);
 ao = ss.pathFovToAo(path_FOV);
-Vx = ao.G(:,1);
-Vy = ao.G(:,2);
+Vx = double(ao.G(:,1));
+Vy = double(ao.G(:,2));
 
 if doOptimizeAO
     aoG_opt = ss.optimizeAO('G', [Vx Vy], [], Fs);
-    Vx = aoG_opt(:,1);
-    Vy = aoG_opt(:,2);
+    Vx = double(aoG_opt(:,1));
+    Vy = double(aoG_opt(:,2));
 end
 
 Vb = [];
 if strcmp(beamMode, 'synced_ao')
-    Vb = ao.B(:,1);
+    Vb = double(ao.B(:,1));
     exposeMask = true(size(Vb));
     if doTurnBlank && numel(Vb) >= 3
         turnMask = localDetectSharpTurns(xExpose_deg, yExpose_deg, turnAngleDeg);
@@ -237,6 +237,9 @@ if strcmp(beamMode, 'synced_ao')
     hAOList{end+1} = hAOb; %#ok<AGROW>
     hUserList{end+1} = bh; %#ok<AGROW>
 end
+
+% dabs.ni.daqmx.Task/writeAnalogData requires double-precision data.
+Vao = double(Vao);
 
 % Register + unreserve resources for task ownership
 didUnreserve = false(1, numel(hAOList));
