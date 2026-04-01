@@ -5,6 +5,7 @@ function info = grab_and_save_with_metadata(saveDir, varargin)
 % The filename stem includes metadata:
 %   - PDT (pixel dwell time, seconds)
 %   - depth z (um)
+%   - zoom factor (x)
 %
 % Usage:
 %   info = grab_and_save_with_metadata('/path/to/output');
@@ -17,7 +18,7 @@ function info = grab_and_save_with_metadata(saveDir, varargin)
 %
 % Returns:
 %   info struct with fields:
-%     saveDir, prefix, pdtSec, zUm, fileStem, expectedCounter, files
+%     saveDir, prefix, pdtSec, zUm, zoomFactor, fileStem, expectedCounter, files
 
     p = inputParser();
     p.addRequired('saveDir', @(x)ischar(x) || (isstring(x) && isscalar(x)));
@@ -49,11 +50,13 @@ function info = grab_and_save_with_metadata(saveDir, varargin)
 
     pdtSec = getPdtSec(hSI);
     zUm = getDepthUm(hSI);
+    zoomFactor = getZoomFactor(hSI);
     timeTag = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
 
     pdtTok = numToToken(pdtSec, 9);
     zTok = numToToken(zUm, 3);
-    stem = sprintf('%s_PDTs%s_Zum%s_%s', prefix, pdtTok, zTok, timeTag);
+    zoomTok = numToToken(zoomFactor, 3);
+    stem = sprintf('%s_PDTs%s_Zum%s_Zoomx%s_%s', prefix, pdtTok, zTok, zoomTok, timeTag);
 
     if ~hSI.hChannels.loggingEnable
         error('grab_and_save_with_metadata:SaveDisabled', ...
@@ -79,6 +82,7 @@ function info = grab_and_save_with_metadata(saveDir, varargin)
     info.prefix = prefix;
     info.pdtSec = pdtSec;
     info.zUm = zUm;
+    info.zoomFactor = zoomFactor;
     info.fileStem = stem;
     info.expectedCounter = expectedCounter;
     info.files = files;
@@ -132,6 +136,14 @@ function zUm = getDepthUm(hSI)
         if ~isempty(zs) && isfinite(zs(1))
             zUm = double(zs(1));
         end
+    catch
+    end
+end
+
+function zoomFactor = getZoomFactor(hSI)
+    zoomFactor = NaN;
+    try
+        zoomFactor = double(hSI.hRoiManager.scanZoomFactor);
     catch
     end
 end
