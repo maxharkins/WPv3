@@ -24,7 +24,7 @@ function resolvedDest = moveStage(hWP, globalDest, relativeDest)
             warning('moveStage:NoSerialPort', 'Stage XY move requested but serial port COM handle is unavailable.');
         end
     end
-    
+    return % skip z...
     doZ = abs(relativeDest(3)) > 1e-9;
     if doZ
         out = moveZaxis_fast(hWP, globalDest(3), ...
