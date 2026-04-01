@@ -1,71 +1,138 @@
+Updated and saved at [frame_scan_ablation_imaging_grabs.m](/Users/maxharkins/Documents/Research%20-%20Zhang%20%26%20Brown%20Labs/ScanImage_tailored/frame_scan_ablation_imaging_grabs.m).
+
+```matlab
 % Frame-scan ablation + imaging grabs (no custom raster/path playback)
 %
-% This script runs TWO grabs at each z:
-%   1) ablation grab (frame scan settings A)
-%   2) imaging grab  (frame scan settings B)
+% Quick use:
+% 1) Edit the USER CONFIG section.
+% 2) Run this script.
+% 3) For each z, it runs two GRABs:
+%       - ablation grab
+%       - imaging grab
 %
-% It controls:
-%   - pixels per line
-%   - lines per frame
-%   - pixel dwell time (via sampleRate/pixelBinFactor when supported)
-%   - optional FOV shift (scanAngleShiftFast/Slow)
+% This script sets, before each grab:
+%   - zoom factor with: setZoomFactor(hSICtl, targetZoomFactor)
+%   - pixelsPerLine
+%   - linesPerFrame
+%   - pixel dwell time (best achievable)
+%   - beam power fraction
 
-%% ablation scan config
-ablation_pixels_per_line = 512;   % pixels
-ablation_lines_per_frame = 64;    % lines
-ablation_pixel_dwell_s = 2e-6;    % seconds
-Pf_ablation = 0.70;               % beam power fraction (0..1)
+%% ========================= USER CONFIG =========================
 
-%% imaging scan config
-imaging_pixels_per_line = 512;    % pixels
-imaging_lines_per_frame = 512;    % lines
-imaging_pixel_dwell_s = 1e-6;     % seconds
-Pf_imaging = 0.10;                % beam power fraction (0..1)
+% Ablation grab settings (physical targeting)
+ablation_width_um      = 120;    % target width in sample plane
+ablation_height_um     = 20;     % target height in sample plane
+ablation_beam_waist_um = 0.79;   % one pixel per beam waist
+ablation_pixel_dwell_s = 2e-6;
+Pf_ablation            = 0.70;
 
-%% optional FOV shift
+% Imaging grab settings
+imaging_pixels_per_line = 512;
+imaging_lines_per_frame = 512;
+imaging_pixel_dwell_s   = 1e-6;
+Pf_imaging              = 0.10;
+
+% Imaging zoom options:
+% - If imaging_use_target_fov_um = true, zoom is computed by microns2zoom().
+% - Otherwise imaging_zoom_factor is used directly.
+imaging_use_target_fov_um = false;
+imaging_target_fov_um     = 300;
+imaging_zoom_factor       = 4.0;
+
+% Optional FOV shift (ScanImage scanner-angle units, not um)
 apply_fov_shift = true;
-fov_shift_mode = 'absolute';      % 'absolute' or 'relative'
-fov_shift_fast = 0;               % scanner-angle units (not um)
-fov_shift_slow = 0;               % scanner-angle units (not um)
+fov_shift_mode  = 'absolute';   % 'absolute' or 'relative'
+fov_shift_fast  = 0;
+fov_shift_slow  = 0;
 
-%% z config
-zs = 100;                         % um (scalar or vector)
+% Z positions (um), scalar or vector
+zs = 100;
 
-%% save config
+% Save settings
 save_dir = "C:\Users\SCIENTIFICA\Box\Zhang&Brown\Experiments\2026\2026-03-31_surface-ablations\raw";
 experiment_label = 'exp_004';
 
-%% behavior
-move_settle_s = 0.5;              % seconds
-between_grabs_s = 0.5;            % seconds
+% Timing/behavior
+zoom_settle_s = 0.10;
+move_settle_s = 0.50;
+between_grabs_s = 0.50;
+
+% If true: restore scan settings on exit (even on error)
 restore_original_scan_state = true;
+
+% Only applies when restore_original_scan_state == false
 leave_beam_off_at_end = true;
 
-%% end of config
+%% ======================= END USER CONFIG =======================
+
+% Derive ablation frame settings from physical targets.
+ablation_pixels_per_line = max(4, round(ablation_width_um / ablation_beam_waist_um));
+ablation_lines_per_frame = max(2, round(ablation_height_um / ablation_beam_waist_um));
+ablation_target_fov_um = ablation_pixels_per_line * ablation_beam_waist_um;
+
+try
+    ablation_zoom_factor = double(microns2zoom(ablation_target_fov_um));
+catch ME
+    error(['microns2zoom() failed for ablation settings. ' ...
+           'Make sure microns2zoom is on your MATLAB path. Details: %s'], ME.message);
+end
+
+if imaging_use_target_fov_um
+    try
+        imaging_zoom_factor = double(microns2zoom(imaging_target_fov_um));
+    catch ME
+        error(['microns2zoom() failed for imaging settings. ' ...
+               'Make sure microns2zoom is on your MATLAB path. Details: %s'], ME.message);
+    end
+end
+
+ablation_fov_um_actual = safeZoom2Microns(ablation_zoom_factor);
+imaging_fov_um_actual = safeZoom2Microns(imaging_zoom_factor);
+
+ablation_height_um_actual = ablation_fov_um_actual * (ablation_lines_per_frame / ablation_pixels_per_line);
+imaging_height_um_actual = imaging_fov_um_actual * (imaging_lines_per_frame / imaging_pixels_per_line);
 
 assert(exist('configure_grab_basename', 'file') == 2, ...
-    'configure_grab_basename.m not found on path.');
+    'configure_grab_basename.m not found on MATLAB path.');
 assert(exist('grab_and_save_with_metadata', 'file') == 2, ...
-    'grab_and_save_with_metadata.m not found on path.');
+    'grab_and_save_with_metadata.m not found on MATLAB path.');
 
+% Resolve hSI
 if exist('hWP', 'var') && ~isempty(hWP)
     hSI = hWP.hSI;
-elseif evalin('base', "exist('hWP','var')")
+elseif exist('hSI', 'var') && ~isempty(hSI)
+    % use local hSI
+elseif evalin('base', 'exist(''hWP'',''var'')')
     hWP = evalin('base', 'hWP');
     hSI = hWP.hSI;
-elseif evalin('base', "exist('hSI','var')")
+elseif evalin('base', 'exist(''hSI'',''var'')')
     hSI = evalin('base', 'hSI');
 else
-    error('Could not find hWP or hSI in workspace.');
+    error('Could not find hWP or hSI in local/base workspace.');
+end
+
+% Resolve hSICtl (needed for setZoomFactor)
+if exist('hSICtl', 'var') && ~isempty(hSICtl)
+    % use local hSICtl
+elseif evalin('base', 'exist(''hSICtl'',''var'')')
+    hSICtl = evalin('base', 'hSICtl');
+else
+    hSICtl = [];
+    try
+        hSICtl = hSI.hController;
+    catch
+    end
 end
 
 assert(isvalid(hSI), 'hSI handle is invalid.');
-assert(~isempty(hSI.hScan2D.hBeams), 'No beam handles found at hSI.hScan2D.hBeams.');
+assert(~isempty(hSICtl) && isvalid(hSICtl), ...
+    'Could not resolve a valid hSICtl handle (required for setZoomFactor).');
+assert(~isempty(hSI.hScan2D.hBeams), 'No beams found at hSI.hScan2D.hBeams.');
 beam = hSI.hScan2D.hBeams{1};
 
 prev = snapshotState(hSI, beam);
 if restore_original_scan_state
-    c = onCleanup(@()restoreState(hSI, beam, prev)); %#ok<NASGU>
+    cleanupObj = onCleanup(@()restoreState(hSI, hSICtl, beam, prev)); %#ok<NASGU>
 end
 
 try
@@ -79,21 +146,40 @@ end
 
 results = repmat(struct('z_um', nan, 'ablation', [], 'imaging', []), numel(zs), 1);
 
-disp('starting...')
+fprintf('\nPlanned settings:\n');
+fprintf('  Ablation: zoom %.3f, %d x %d px, target %.2f x %.2f um, estimated %.2f x %.2f um\n', ...
+    ablation_zoom_factor, ...
+    ablation_pixels_per_line, ablation_lines_per_frame, ...
+    ablation_width_um, ablation_height_um, ...
+    ablation_fov_um_actual, ablation_height_um_actual);
+fprintf('  Imaging : zoom %.3f, %d x %d px, estimated %.2f x %.2f um\n\n', ...
+    imaging_zoom_factor, ...
+    imaging_pixels_per_line, imaging_lines_per_frame, ...
+    imaging_fov_um_actual, imaging_height_um_actual);
+
+fprintf('Starting frame-scan ablation/imaging sequence...\n');
+
 for zIdx = 1:numel(zs)
     z = zs(zIdx);
-    fprintf('starting #%d at z=%.3f um\n', zIdx, z);
+    fprintf('z #%d/%d: %.3f um\n', zIdx, numel(zs), z);
 
     hSI.hMotors.moveSampleNoQuery([NaN, NaN, z], true);
     pause(move_settle_s);
 
-    % Ablation grab
+    % -------- Ablation grab --------
     setBeamPowerFrac(beam, Pf_ablation);
-    pdt_ablation_actual = applyFrameScanSettings( ...
-        hSI, ablation_pixels_per_line, ablation_lines_per_frame, ablation_pixel_dwell_s);
-    fprintf('  ablation: %d x %d, target PDT=%.3g s, actual PDT=%.3g s\n', ...
+    [zoomA_actual, pdtA_actual] = applyGrabScanSettings( ...
+        hSI, hSICtl, ...
+        ablation_zoom_factor, ...
+        ablation_pixels_per_line, ...
+        ablation_lines_per_frame, ...
+        ablation_pixel_dwell_s, ...
+        zoom_settle_s);
+
+    fprintf('  Ablation: zoom %.3f -> %.3f, %d x %d, PDT %.3g -> %.3g s\n', ...
+        ablation_zoom_factor, zoomA_actual, ...
         ablation_pixels_per_line, ablation_lines_per_frame, ...
-        ablation_pixel_dwell_s, pdt_ablation_actual);
+        ablation_pixel_dwell_s, pdtA_actual);
 
     stemA = sprintf('%s_z%s_ablation', experiment_label, zToStem(z));
     cfgA = configure_grab_basename(save_dir, stemA, ...
@@ -102,10 +188,16 @@ for zIdx = 1:numel(zs)
             'experiment', experiment_label, ...
             'grab_type', 'ablation', ...
             'z_um', z, ...
+            'zoom_factor_target', ablation_zoom_factor, ...
+            'zoom_factor_actual', zoomA_actual, ...
+            'target_width_um', ablation_width_um, ...
+            'target_height_um', ablation_height_um, ...
+            'estimated_fov_um', ablation_fov_um_actual, ...
+            'estimated_height_um', ablation_height_um_actual, ...
             'pixels_per_line', ablation_pixels_per_line, ...
             'lines_per_frame', ablation_lines_per_frame, ...
             'pixel_dwell_target_s', ablation_pixel_dwell_s, ...
-            'pixel_dwell_actual_s', pdt_ablation_actual, ...
+            'pixel_dwell_actual_s', pdtA_actual, ...
             'beam_power_fraction', Pf_ablation, ...
             'scan_shift_fast', hSI.hRoiManager.scanAngleShiftFast, ...
             'scan_shift_slow', hSI.hRoiManager.scanAngleShiftSlow));
@@ -113,13 +205,20 @@ for zIdx = 1:numel(zs)
 
     pause(between_grabs_s);
 
-    % Imaging grab
+    % -------- Imaging grab --------
     setBeamPowerFrac(beam, Pf_imaging);
-    pdt_imaging_actual = applyFrameScanSettings( ...
-        hSI, imaging_pixels_per_line, imaging_lines_per_frame, imaging_pixel_dwell_s);
-    fprintf('  imaging : %d x %d, target PDT=%.3g s, actual PDT=%.3g s\n', ...
+    [zoomI_actual, pdtI_actual] = applyGrabScanSettings( ...
+        hSI, hSICtl, ...
+        imaging_zoom_factor, ...
+        imaging_pixels_per_line, ...
+        imaging_lines_per_frame, ...
+        imaging_pixel_dwell_s, ...
+        zoom_settle_s);
+
+    fprintf('  Imaging : zoom %.3f -> %.3f, %d x %d, PDT %.3g -> %.3g s\n', ...
+        imaging_zoom_factor, zoomI_actual, ...
         imaging_pixels_per_line, imaging_lines_per_frame, ...
-        imaging_pixel_dwell_s, pdt_imaging_actual);
+        imaging_pixel_dwell_s, pdtI_actual);
 
     stemI = sprintf('%s_z%s_imaging', experiment_label, zToStem(z));
     cfgI = configure_grab_basename(save_dir, stemI, ...
@@ -128,18 +227,32 @@ for zIdx = 1:numel(zs)
             'experiment', experiment_label, ...
             'grab_type', 'imaging', ...
             'z_um', z, ...
+            'zoom_factor_target', imaging_zoom_factor, ...
+            'zoom_factor_actual', zoomI_actual, ...
+            'estimated_fov_um', imaging_fov_um_actual, ...
+            'estimated_height_um', imaging_height_um_actual, ...
             'pixels_per_line', imaging_pixels_per_line, ...
             'lines_per_frame', imaging_lines_per_frame, ...
             'pixel_dwell_target_s', imaging_pixel_dwell_s, ...
-            'pixel_dwell_actual_s', pdt_imaging_actual, ...
+            'pixel_dwell_actual_s', pdtI_actual, ...
             'beam_power_fraction', Pf_imaging, ...
             'scan_shift_fast', hSI.hRoiManager.scanAngleShiftFast, ...
             'scan_shift_slow', hSI.hRoiManager.scanAngleShiftSlow));
     outI = grab_and_save_with_metadata('HSI', hSI, 'Config', cfgI);
 
     results(zIdx).z_um = z;
-    results(zIdx).ablation = outA;
-    results(zIdx).imaging = outI;
+    results(zIdx).ablation = struct( ...
+        'output', outA, ...
+        'zoom_target', ablation_zoom_factor, ...
+        'zoom_actual', zoomA_actual, ...
+        'pdt_target_s', ablation_pixel_dwell_s, ...
+        'pdt_actual_s', pdtA_actual);
+    results(zIdx).imaging = struct( ...
+        'output', outI, ...
+        'zoom_target', imaging_zoom_factor, ...
+        'zoom_actual', zoomI_actual, ...
+        'pdt_target_s', imaging_pixel_dwell_s, ...
+        'pdt_actual_s', pdtI_actual);
 
     pause(between_grabs_s);
 end
@@ -149,9 +262,35 @@ if leave_beam_off_at_end && ~restore_original_scan_state
 end
 
 assignin('base', 'ablation_imaging_results', results);
-disp('done.')
+fprintf('Done.\n');
 
-function pdt_actual = applyFrameScanSettings(hSI, pixels_per_line, lines_per_frame, pdt_target_s)
+function [zoom_actual, pdt_actual] = applyGrabScanSettings( ...
+    hSI, hSICtl, zoom_target, pixels_per_line, lines_per_frame, pdt_target_s, zoom_settle_s)
+
+    zoom_actual = setZoomWithController(hSI, hSICtl, zoom_target, zoom_settle_s);
+    pdt_actual = applyFrameTiming(hSI, pixels_per_line, lines_per_frame, pdt_target_s);
+end
+
+function zoom_actual = setZoomWithController(hSI, hSICtl, zoom_target, zoom_settle_s)
+    validateattributes(zoom_target, {'numeric'}, {'scalar', 'finite', 'positive'});
+    try
+        setZoomFactor(hSICtl, zoom_target);
+    catch ME
+        error('setZoomFactor(hSICtl, targetZoomFactor) failed: %s', ME.message);
+    end
+
+    if zoom_settle_s > 0
+        pause(zoom_settle_s);
+    end
+
+    zoom_actual = nan;
+    try
+        zoom_actual = double(hSI.hRoiManager.scanZoomFactor);
+    catch
+    end
+end
+
+function pdt_actual = applyFrameTiming(hSI, pixels_per_line, lines_per_frame, pdt_target_s)
     validateattributes(pixels_per_line, {'numeric'}, {'scalar', 'finite', 'positive'});
     validateattributes(lines_per_frame, {'numeric'}, {'scalar', 'finite', 'positive'});
     validateattributes(pdt_target_s, {'numeric'}, {'scalar', 'finite', 'positive'});
@@ -162,7 +301,7 @@ function pdt_actual = applyFrameScanSettings(hSI, pixels_per_line, lines_per_fra
     hScan = hSI.hScan2D;
     applied = false;
 
-    % Strategy 1: choose sampleRate/pixelBinFactor pair nearest to target dwell.
+    % Best-effort dwell setting via sampleRate/pixelBinFactor
     try
         rates = [];
         if isprop(hScan, 'validSampleRates')
@@ -191,17 +330,22 @@ function pdt_actual = applyFrameScanSettings(hSI, pixels_per_line, lines_per_fra
 
             if isfinite(bestRate) && isfinite(bestBin)
                 try
-                    hScan.sampleRate = bestRate;
+                    if isprop(hScan, 'sampleRate')
+                        hScan.sampleRate = bestRate;
+                    end
                 catch
                 end
-                hScan.pixelBinFactor = bestBin;
-                applied = true;
+                try
+                    hScan.pixelBinFactor = bestBin;
+                    applied = true;
+                catch
+                end
             end
         end
     catch
     end
 
-    % Strategy 2 fallback: linePeriod = pdt * pixelsPerLine
+    % Fallback: linePeriod = pixelDwell * pixelsPerLine
     if ~applied
         try
             hSI.hRoiManager.linePeriod = pdt_target_s * double(hSI.hRoiManager.pixelsPerLine);
@@ -210,9 +354,14 @@ function pdt_actual = applyFrameScanSettings(hSI, pixels_per_line, lines_per_fra
         end
     end
 
-    pdt_actual = double(hSI.hScan2D.scanPixelTimeMean);
+    pdt_actual = nan;
+    try
+        pdt_actual = double(hSI.hScan2D.scanPixelTimeMean);
+    catch
+    end
+
     if ~applied
-        warning('Could not set pixel dwell time on this scan mode/hardware. Using current timing.');
+        warning('Could not set dwell time on this scan mode/hardware. Using current timing.');
     end
 end
 
@@ -248,9 +397,18 @@ function out = zToStem(z)
     out = strrep(out, '.', 'p');
 end
 
+function fov_um = safeZoom2Microns(zoom_factor)
+    fov_um = nan;
+    try
+        fov_um = double(zoom2microns(zoom_factor));
+    catch
+    end
+end
+
 function s = snapshotState(hSI, beam)
     s = struct();
     s.scanType = '';
+    s.scanZoomFactor = nan;
     s.pixelsPerLine = nan;
     s.linesPerFrame = nan;
     s.linePeriod = nan;
@@ -261,6 +419,7 @@ function s = snapshotState(hSI, beam)
     s.beamPowerFraction = nan;
 
     try, s.scanType = hSI.hRoiManager.scanType; catch, end
+    try, s.scanZoomFactor = double(hSI.hRoiManager.scanZoomFactor); catch, end
     try, s.pixelsPerLine = double(hSI.hRoiManager.pixelsPerLine); catch, end
     try, s.linesPerFrame = double(hSI.hRoiManager.linesPerFrame); catch, end
     try, s.linePeriod = double(hSI.hRoiManager.linePeriod); catch, end
@@ -271,8 +430,15 @@ function s = snapshotState(hSI, beam)
     try, s.beamPowerFraction = double(beam.powerFraction); catch, end
 end
 
-function restoreState(hSI, beam, s)
+function restoreState(hSI, hSICtl, beam, s)
     try, hSI.hRoiManager.scanType = s.scanType; catch, end
+    if isfinite(s.scanZoomFactor)
+        try
+            setZoomFactor(hSICtl, s.scanZoomFactor);
+        catch
+            try, hSI.hRoiManager.scanZoomFactor = s.scanZoomFactor; catch, end
+        end
+    end
     try, hSI.hRoiManager.pixelsPerLine = s.pixelsPerLine; catch, end
     try, hSI.hRoiManager.linesPerFrame = s.linesPerFrame; catch, end
     try, hSI.hRoiManager.linePeriod = s.linePeriod; catch, end
@@ -282,3 +448,4 @@ function restoreState(hSI, beam, s)
     try, hSI.hRoiManager.scanAngleShiftSlow = s.scanAngleShiftSlow; catch, end
     try, setBeamPowerFrac(beam, s.beamPowerFraction); catch, end
 end
+```
