@@ -81,7 +81,7 @@ function importFile(obj, filePath)
                 zMin = min(coords_XYZ(:,3));
                 zMax = max(coords_XYZ(:,3));
                 zCenter = (zMin + zMax) / 2;
-                coords_XYZ(:,3) = coords_XYZ(:,3) - zCenter;
+                %coords_XYZ(:,3) = coords_XYZ(:,3) - zCenter;
                 obj.hMask.hNodes.BasePoints = coords_XYZ;
 
                 if isempty(obj.hMask.hNodes.BasePoints)

@@ -6,7 +6,7 @@ function startScanMapping(hWP)
 %   - Handles single-tile or multi-tile stacks (scanPaths normalized to column)
 %   - Skips empty tiles / missing Z-levels / missing paths gracefully
 %   - Ensures each scan path has >= 2 points (prevents zero-length playback)
-%   - Correct scan-time estimate consistent with playPreexistingPath resampling
+%   - Correct scan-time e+stimate consistent with playPreexistingPath resampling
 %   - Resolves power from either hWP.Settings.Power_pct or Power_mW
 %     (with Pockels calibration) and maps to PowerFrac robustly
 %   - Z moves use moveSampleNoQuery and software-tracked stage Z (no anchoring)
@@ -30,7 +30,7 @@ function startScanMapping(hWP)
         % ---- stack + stage
         stack     = hWP.hStacks;
         stagePath = hWP.aPath.Coordinates;
-
+        
         scanPaths = stack.ScanPaths(:);    % normalize to column cell array
         numTiles  = numel(scanPaths);
 
@@ -262,7 +262,7 @@ function startScanMapping(hWP)
             try
                 fprintf("Num chunk: %d\n",numel(chunks))
                 for cIdx = 1:numel(chunks)
-                    segXY = chunks(cIdx).xy;
+                    segXY = chunks(cIdx).xy + [-55 16];
                     if size(segXY,1) < 2
                         continue;
                     end
