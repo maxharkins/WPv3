@@ -13,6 +13,7 @@ function [stats, model] = playPreexistingPathSIStyle(hX, hY, x_um, y_um, PDT_s, 
 % Name/Value:
 %   'BeamWaistDiameter_um' ([]) beam waist diameter [um]
 %   'Dot_um'               (0.80) legacy alias for beam waist diameter
+%   'OverlapFraction'      (0.75) desired fractional overlap [0..1) for spacing from beam waist
 %   'RasterSpacing_um'     ([]) explicit spacing override [um]
 %   'Model'                ([]) micronsToDegrees model
 %   'LeadIn_s'             (0) lead samples at first point (beam OFF)
@@ -31,6 +32,7 @@ function [stats, model] = playPreexistingPathSIStyle(hX, hY, x_um, y_um, PDT_s, 
 p = inputParser;
 p.addParameter('BeamWaistDiameter_um', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0));
 p.addParameter('Dot_um', 0.80, @(x) isnumeric(x) && isscalar(x) && x > 0);
+p.addParameter('OverlapFraction', 0.75, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x < 1);
 p.addParameter('RasterSpacing_um', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0));
 p.addParameter('Model', [], @(x) true);
 p.addParameter('LeadIn_s', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
@@ -60,10 +62,11 @@ beamWaist_um = p.Results.Dot_um;
 if ~isempty(p.Results.BeamWaistDiameter_um)
     beamWaist_um = p.Results.BeamWaistDiameter_um;
 end
+overlapFrac = p.Results.OverlapFraction;
 if ~isempty(p.Results.RasterSpacing_um)
     spacing_um_target = p.Results.RasterSpacing_um;
 else
-    spacing_um_target = localRasterSpacingFromBeamWaist(beamWaist_um);
+    spacing_um_target = localRasterSpacingFromBeamWaist(beamWaist_um, overlapFrac);
 end
 
 model = p.Results.Model;
@@ -293,6 +296,7 @@ stats = struct( ...
     'duration_s', N / Fs, ...
     'elapsed_s', elapsed_s, ...
     'totalLength_um', L, ...
+    'overlapFraction', overlapFrac, ...
     'spacingTarget_um', spacing_um_target, ...
     'spacingEffective_um', spacing_um_eff, ...
     'speedEffective_um_s', spacing_um_eff / PDT_s, ...
@@ -308,11 +312,11 @@ function [xx, yy] = localStimPath(tt, x, y, Fs)
     yy = interp1(tx, y, t, 'linear', 'extrap');
 end
 
-function spacing_um = localRasterSpacingFromBeamWaist(beamWaist_um)
+function spacing_um = localRasterSpacingFromBeamWaist(beamWaist_um, overlapFrac)
     if exist('wpRasterSpacingFromBeamWaist', 'file') == 2
-        spacing_um = wpRasterSpacingFromBeamWaist(beamWaist_um);
+        spacing_um = wpRasterSpacingFromBeamWaist(beamWaist_um, overlapFrac);
     else
-        spacing_um = beamWaist_um / 2;
+        spacing_um = beamWaist_um * (1 - overlapFrac);
     end
     validateattributes(spacing_um, {'numeric'}, {'scalar', 'real', 'positive', 'finite'});
 end

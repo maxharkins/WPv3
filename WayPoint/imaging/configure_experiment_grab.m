@@ -4,12 +4,15 @@ function out = configure_experiment_grab(experimentName, varargin)
 %
 % This utility does the following:
 %   1) sets save root to:
-%      <BaseDir>/Zhang&Brown/Experiments/<year>/<YYYY-MM-DD>_<experimentName>
+%      <BaseDir>/Zhang&Brown/Experiments/<year>/<YYYY-MM-DD>_<experimentName>/raw
+%      and creates sibling log folder:
+%      <BaseDir>/Zhang&Brown/Experiments/<year>/<YYYY-MM-DD>_<experimentName>/log
 %   2) enables saving (hSI.hChannels.loggingEnable = true)
 %   3) ensures channel 3 is in hSI.hChannels.channelSave
 %   4) builds metadata-rich filename stem from current acquisition settings
 %   5) writes extra metadata into TIFF ImageDescription via
 %      grab_and_save_with_metadata (optional)
+%   6) writes a setup log file to the experiment log folder
 %
 % Usage examples:
 %   cfg = configure_experiment_grab('cortex-window');
@@ -29,7 +32,8 @@ function out = configure_experiment_grab(experimentName, varargin)
 %
 % Output:
 %   out struct with fields:
-%   saveDir, baseNameRequested, baseNameResolved, metadata, cfg
+%   experimentDir, rawDir, logDir, saveDir, baseNameRequested,
+%   baseNameResolved, metadata, cfg, setupLog
 %   and (if RunGrab=true) out.grab containing grab_and_save_with_metadata output.
 
     ip = inputParser();
@@ -42,7 +46,7 @@ function out = configure_experiment_grab(experimentName, varargin)
     ip.addParameter('EnsureChannel', 3, @(x)isnumeric(x) && isscalar(x) && isfinite(x) && x >= 1 && mod(x,1)==0);
     ip.addParameter('RunGrab', false, @(x)islogical(x) || (isnumeric(x) && isscalar(x)));
     ip.addParameter('ExtraMetadata', struct(), @(x)isstruct(x) || ischar(x) || (isstring(x) && isscalar(x)));
-    ip.addParameter('TimeoutSec', 60*10, @(x)isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
+    ip.addParameter('TimeoutSec', 120, @(x)isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
     ip.parse(experimentName, varargin{:});
 
     experimentName = char(string(ip.Results.experimentName));
@@ -56,16 +60,22 @@ function out = configure_experiment_grab(experimentName, varargin)
 
     experimentsRoot = resolveExperimentsRoot(hSI, char(string(ip.Results.BaseDir)), yearFolder);
     folderName = buildExperimentFolderName(experimentName);
-    saveDir = fullfile(experimentsRoot, folderName);
-    if ~exist(saveDir, 'dir')
-        mkdir(saveDir);
-    end
+    experimentDir = fullfile(experimentsRoot, folderName);
+    rawDir = fullfile(experimentDir, 'raw');
+    logDir = fullfile(experimentDir, 'log');
+    ensureDir(experimentDir);
+    ensureDir(rawDir);
+    ensureDir(logDir);
+    saveDir = rawDir;
 
     md = collectAcqMetadata(hSI);
     md = mergeMetadata(md, normalizeUserMetadata(ip.Results.ExtraMetadata));
     md.experiment_name = experimentName;
     md.experiment_folder = folderName;
     md.experiments_root = experimentsRoot;
+    md.experiment_dir = experimentDir;
+    md.raw_dir = rawDir;
+    md.log_dir = logDir;
     md.generated_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss'));
     md.tiff_note = ['ScanImage native metadata stays in TIFF tags; ', ...
         'CustomMetadataJSON is appended by grab_and_save_with_metadata.'];
@@ -74,6 +84,9 @@ function out = configure_experiment_grab(experimentName, varargin)
     cfg = configure_grab_basename(saveDir, requestedStem, 'HSI', hSI, 'UserMetadata', md);
 
     out = struct();
+    out.experimentDir = experimentDir;
+    out.rawDir = rawDir;
+    out.logDir = logDir;
     out.saveDir = saveDir;
     out.baseNameRequested = requestedStem;
     out.baseNameResolved = cfg.baseNameResolved;
@@ -89,6 +102,8 @@ function out = configure_experiment_grab(experimentName, varargin)
             'Metadata', md, ...
             'TimeoutSec', timeoutSec);
     end
+
+    out.setupLog = writeSetupLog(logDir, out);
 end
 
 function hSI = resolveHSI(hSI)
@@ -628,6 +643,114 @@ function txt = safeEnumText(v)
     catch
         txt = '';
     end
+end
+
+function ensureDir(dirPath)
+    if ~exist(dirPath, 'dir')
+        mkdir(dirPath);
+    end
+end
+
+function logInfo = writeSetupLog(logDir, out)
+    ensureDir(logDir);
+
+    ts = datetime('now');
+    tsFile = char(datetime(ts, 'Format', 'yyyyMMdd_HHmmss_SSS'));
+    tsHuman = char(datetime(ts, 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+
+    baseName = ['configure_experiment_grab_' tsFile];
+    jsonPath = fullfile(logDir, [baseName '.json']);
+    txtPath = fullfile(logDir, [baseName '.txt']);
+
+    logData = struct();
+    logData.timestamp_local = tsHuman;
+    logData.experiment_dir = getFieldOr(out, 'experimentDir', '');
+    logData.raw_dir = getFieldOr(out, 'rawDir', '');
+    logData.log_dir = getFieldOr(out, 'logDir', '');
+    logData.save_dir = getFieldOr(out, 'saveDir', '');
+    logData.base_name_requested = getFieldOr(out, 'baseNameRequested', '');
+    logData.base_name_resolved = getFieldOr(out, 'baseNameResolved', '');
+    logData.channel_save = getFieldOr(out, 'channelSave', []);
+    logData.save_enabled = getFieldOr(out, 'saveEnabled', false);
+    logData.metadata = getFieldOr(out, 'metadata', struct());
+
+    if isfield(out, 'grab')
+        logData.grab = struct();
+        logData.grab.files = getFieldOr(out.grab, 'files', {});
+        logData.grab.counter_used = getFieldOr(out.grab, 'counterUsed', nan);
+    end
+
+    fid = -1;
+    try
+        fid = fopen(jsonPath, 'w');
+        assert(fid > 0, 'configure_experiment_grab:LogOpenFailed', 'Could not open JSON log file.');
+        fwrite(fid, jsonencode(logData), 'char');
+        fclose(fid);
+        fid = -1;
+        jsonOk = true;
+    catch
+        if fid > 0
+            fclose(fid);
+        end
+        jsonOk = false;
+    end
+
+    fid = fopen(txtPath, 'w');
+    if fid > 0
+        fprintf(fid, 'configure_experiment_grab log\n');
+        fprintf(fid, 'timestamp_local: %s\n', tsHuman);
+        fprintf(fid, 'experiment_dir: %s\n', char(string(logData.experiment_dir)));
+        fprintf(fid, 'raw_dir: %s\n', char(string(logData.raw_dir)));
+        fprintf(fid, 'log_dir: %s\n', char(string(logData.log_dir)));
+        fprintf(fid, 'save_dir: %s\n', char(string(logData.save_dir)));
+        fprintf(fid, 'base_name_requested: %s\n', char(string(logData.base_name_requested)));
+        fprintf(fid, 'base_name_resolved: %s\n', char(string(logData.base_name_resolved)));
+        fprintf(fid, 'channel_save: %s\n', numericVectorToString(logData.channel_save));
+        fprintf(fid, 'save_enabled: %d\n', logical(logData.save_enabled));
+        if isfield(logData, 'grab')
+            fprintf(fid, 'grab_counter_used: %s\n', num2str(logData.grab.counter_used));
+            fprintf(fid, 'grab_files_count: %d\n', numel(logData.grab.files));
+            for i = 1:numel(logData.grab.files)
+                fprintf(fid, 'grab_file_%02d: %s\n', i, char(string(logData.grab.files{i})));
+            end
+        end
+        if jsonOk
+            fprintf(fid, 'json_log: %s\n', jsonPath);
+        else
+            fprintf(fid, 'json_log: not written\n');
+        end
+        fclose(fid);
+    end
+
+    logInfo = struct();
+    logInfo.timestampLocal = tsHuman;
+    logInfo.textPath = txtPath;
+    if jsonOk
+        logInfo.jsonPath = jsonPath;
+    else
+        logInfo.jsonPath = '';
+    end
+end
+
+function v = getFieldOr(s, fieldName, defaultValue)
+    if isstruct(s) && isfield(s, fieldName)
+        v = s.(fieldName);
+    else
+        v = defaultValue;
+    end
+end
+
+function s = numericVectorToString(v)
+    if isempty(v)
+        s = '';
+        return;
+    end
+    if ~isnumeric(v)
+        s = char(string(v));
+        return;
+    end
+    vals = arrayfun(@(x)sprintf('%g', x), v(:)', 'UniformOutput', false);
+    s = strjoin(vals, ',');
 end
 
 function md = normalizeUserMetadata(userMeta)

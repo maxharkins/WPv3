@@ -60,6 +60,7 @@ motor_overhead_per_slice_s = 0.70; % estimate-only additive overhead per Z layer
 % Optional beam waist override for playback spacing model.
 % Set NaN to use hWP.Settings.BeamWaistDiameter_um.
 beam_waist_um_override = NaN;
+overlap_fraction = 0.75; % [0,1): 0.75 => spacing is 25% of beam waist diameter
 
 verbose = true;
 
@@ -81,6 +82,7 @@ validateattributes(length_y_um, {'numeric'}, {'scalar', 'finite', 'positive'});
 validateattributes(spacing_x_um, {'numeric'}, {'scalar', 'finite', 'positive'});
 validateattributes(spacing_y_um, {'numeric'}, {'scalar', 'finite', 'positive'});
 validateattributes(spacing_z_um, {'numeric'}, {'scalar', 'finite', 'positive'});
+validateattributes(overlap_fraction, {'numeric'}, {'scalar', 'finite', '>=', 0, '<', 1});
 validateattributes(plot_decimation, {'numeric'}, {'scalar', 'finite', 'integer', '>=', 1});
 validateattributes(plot_pause_s, {'numeric'}, {'scalar', 'finite', '>=', 0});
 validateattributes(motor_overhead_per_slice_s, {'numeric'}, {'scalar', 'finite', '>=', 0});
@@ -117,6 +119,7 @@ if verbose
         diameter_xz_um, length_y_um);
     fprintf('Spacing: dX=%.3f um, dY=%.3f um, dZ=%.3f um | z mode: %s\n', ...
         spacing_x_um, spacing_y_um, spacing_z_um, z_sampling_mode);
+    fprintf('Playback overlap fraction: %.3f (from beam waist)\n', overlap_fraction);
     fprintf('Layers per site: %d (deep->shallow, high z -> low z)\n\n', numel(z_rel_um));
     fprintf('Estimated duration (nominal): %s (%.1f s) | ETA %s\n', ...
         formatDurationHMS(timing_est.nominal_s), timing_est.nominal_s, char(timing_est.eta_nominal));
@@ -181,6 +184,7 @@ try
             [stats, model] = playPreexistingPathSIStyle( ...
                 hX, hY, x_play, y_play, pdt_s, ...
                 'BeamWaistDiameter_um', beam_waist_um, ...
+                'OverlapFraction', overlap_fraction, ...
                 'Model', model, ...
                 'LeadIn_s', lead_in_s, ...
                 'TailOut_s', tail_out_s, ...
