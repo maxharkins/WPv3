@@ -73,7 +73,8 @@ powerDownstream_ref_W = promptPositiveScalar( ...
     'Enter power immediately downstream of the Pockels cell (W): ');
 setPowerFractionSafe(hSI, pfTransfer);
 pause(opts.SettleTime);
-powerObjective_ref_W = promptPositiveScalar( ...
+powerObjective_ref_W = promptPositiveScalarWithPointBeam( ...
+    hSI, ...
     'Enter power exiting the objective (W): ');
 setPowerFractionSafe(hSI, 0.0);
 
@@ -333,6 +334,36 @@ while true
         return;
     end
     fprintf('Input must be a positive finite scalar.\n');
+end
+end
+
+function v = promptPositiveScalarWithPointBeam(hSI, promptText)
+didPointMode = enterPointBeamMode(hSI);
+cleanupPointMode = onCleanup(@() exitPointBeamMode(hSI, didPointMode)); %#ok<NASGU>
+v = promptPositiveScalar(promptText);
+end
+
+function didPointMode = enterPointBeamMode(hSI)
+didPointMode = false;
+try
+    if ismethod(hSI, 'scanPointBeam')
+        hSI.scanPointBeam();
+        didPointMode = true;
+    end
+catch
+    didPointMode = false;
+end
+end
+
+function exitPointBeamMode(hSI, didPointMode)
+if ~didPointMode
+    return;
+end
+try
+    if ismethod(hSI, 'abort')
+        hSI.abort();
+    end
+catch
 end
 end
 
