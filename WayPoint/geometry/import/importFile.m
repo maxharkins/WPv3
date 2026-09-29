@@ -34,6 +34,9 @@ function importFile(obj, filePath)
     % ------------------------------------------------------------
     obj.hMask = Mask();
     obj.hStacks = Stacks.empty;
+    if ~isempty(obj.aPath)
+        obj.aPath.Coordinates = [];
+    end
     refreshPlot(obj);
 
     % ------------------------------------------------------------
@@ -67,6 +70,7 @@ function importFile(obj, filePath)
             obj.hMask.hTri.ConnectivityList  = T.ConnectivityList;
             
             % Do NOT build paths yet
+            refreshZSliceSelectionUI(obj, true);
             refreshPlot(obj);
             return;
             
@@ -77,17 +81,12 @@ function importFile(obj, filePath)
 
             if isScanPathTXT(filePath)
             
-                coords_XYZ= obj.hStacks.importAndCenterScanPaths(filePath);
-                zMin = min(coords_XYZ(:,3));
-                zMax = max(coords_XYZ(:,3));
-                zCenter = (zMin + zMax) / 2;
-                %coords_XYZ(:,3) = coords_XYZ(:,3) - zCenter;
-                obj.hMask.hNodes.BasePoints = coords_XYZ;
-
-                if isempty(obj.hMask.hNodes.BasePoints)
+                coords_XYZ = obj.hStacks.importAndCenterScanPaths(filePath);
+                if isempty(coords_XYZ)
                     warning('ScanPath file contained no valid coordinates.');
                 end
             
+                refreshZSliceSelectionUI(obj, true);
                 refreshPlot(obj);
                 return;
             end        
@@ -130,6 +129,7 @@ function importFile(obj, filePath)
                         warning('ScanPath file loaded but contained no coordinates.');
                     end
                 
+                    refreshZSliceSelectionUI(obj, true);
                     refreshPlot(obj);
                     return;
         
@@ -143,9 +143,10 @@ function importFile(obj, filePath)
 
             coords_XYZ = obj.hStacks.importAndCenterGCode(filePath, obj);
             if isempty(coords_XYZ)
-                warning('G-code file loaded but contained no extrusion coordinates.');
+                warning('G-code file loaded but contained no usable XY moves.');
             end
 
+            refreshZSliceSelectionUI(obj, true);
             refreshPlot(obj);
             return;
 

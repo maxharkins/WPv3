@@ -17,14 +17,14 @@
 %   - 'percent'  : [0..100]
 
 %% ========================= USER CONFIG =========================
-
+disp('max')
 % Same channel geometry for every site.
-diameter_xz_um = 50;   % circular diameter in X-Z
+diameter_xz_um = 30;   % circular diameter in X-Z
 length_y_um    = 880;   % extrusion length along Y
 
 % Sampling/grid settings.
-spacing_x_um = 0.40;   % spacing between raster lines in X (within a Z layer)
-spacing_y_um = 0.40;   % point spacing along Y in each raster line
+spacing_x_um = 0.8;   % spacing between raster lines in X (within a Z layer)
+spacing_y_um = 0.8;   % point spacing along Y in each raster line
 spacing_z_um = 2;   % Z spacing (PSF ~1.5 um top-to-bottom -> 0.75 um step)
 
 % Z sampling mode for the circular X-Z profile:
@@ -35,7 +35,7 @@ z_sampling_mode = 'grid_only';
 
 % [x_um, y_um, z_um, pixel_dwell_s, power]
 scan_list = [
-   0,   0, 150, 0.08e-3, 1.00;
+   0,   0, 125, 500e-6, 1.00;
 ];
 
 power_units = 'fraction';   % 'fraction' or 'percent'
@@ -60,7 +60,7 @@ motor_overhead_per_slice_s = 0.70; % estimate-only additive overhead per Z layer
 % Optional beam waist override for playback spacing model.
 % Set NaN to use hWP.Settings.BeamWaistDiameter_um.
 beam_waist_um_override = NaN;
-overlap_fraction = 0.75; % [0,1): 0.75 => spacing is 25% of beam waist diameter
+overlap_fraction = 0.00; % [0,1): 0.75 => spacing is 25% of beam waist diameter
 
 verbose = true;
 

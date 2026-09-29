@@ -16,6 +16,8 @@ function startScanMapping(hWP)
     % ---- make sure isPaused and isCancelled are both false
     hWP.isCancelled = false;
     hWP.isPaused = false;
+    setPauseButtonText(hWP, "Pause");
+    syncZSliceSelectionFromUI(hWP);
 
     % ---- time estimate for entire stack (your existing helper)
     figure
@@ -84,7 +86,7 @@ function startScanMapping(hWP)
         end
         syncStageZState(hWP, zTracked_um);
 
-        [zFirstTarget_um, hasFirstTarget] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, hWP.Settings.ZTraversalMode, maskZOffset_um);
+        [zFirstTarget_um, hasFirstTarget] = findFirstExecutableZTarget(hWP, scanPaths, stack, zStep_um, hWP.Settings.ZTraversalMode, maskZOffset_um);
         if hasFirstTarget
             startupDelta = abs(zTracked_um - zFirstTarget_um);
             if startupDelta >= zMaxDeltaGuard
@@ -103,6 +105,11 @@ function startScanMapping(hWP)
     % TILE LOOP
     % ============================================================
         for tileIdx = 1:numTiles
+
+        if waitAtSafeBoundary(hWP)
+            finalizeCancelledRun(hWP, runLog);
+            return;
+        end
 
         % ---- skip empty tile
         if tileIdx > numel(scanPaths) || isempty(scanPaths{tileIdx})
@@ -157,6 +164,18 @@ function startScanMapping(hWP)
         tileMeta = tileMeta(1:n);
         zLevels   = zLevels(1:n);
 
+        % Apply the inclusive slice-number range before traversal sorting.
+        % Slice numbers always count low Z -> high Z, independently of the
+        % chosen Deep/Superficial traversal direction.
+        selected = getSelectedZSliceIndices(hWP, zLevels);
+        tilePaths = tilePaths(selected);
+        tileMeta = tileMeta(selected);
+        zLevels = zLevels(selected);
+        if isempty(zLevels)
+            fprintf('Tile %d has no layers in the selected Z-slice range.\n', tileIdx);
+            continue;
+        end
+
         % ---- Z traversal order
         switch hWP.Settings.ZTraversalMode
             case "ascending"
@@ -172,6 +191,10 @@ function startScanMapping(hWP)
         % Z LOOP
         % ========================================================
             for zIdx = 1:numel(zLevels)
+            if waitAtSafeBoundary(hWP)
+                finalizeCancelledRun(hWP, runLog);
+                return;
+            end
             runLog.counts.layersAttempted = runLog.counts.layersAttempted + 1;
 
             if isempty(tilePaths{zIdx})
@@ -259,9 +282,15 @@ function startScanMapping(hWP)
             scanStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             status = "completed";
             errMsg = moveErr;
+            cancelledDuringLayer = false;
             try
                 fprintf("Num chunk: %d\n",numel(chunks))
                 for cIdx = 1:numel(chunks)
+                    if waitAtSafeBoundary(hWP)
+                        cancelledDuringLayer = true;
+                        break;
+                    end
+
                     segXY = chunks(cIdx).xy + [-55 16];
                     if size(segXY,1) < 2
                         continue;
@@ -292,7 +321,10 @@ function startScanMapping(hWP)
                         'TurnBlank_s', 0.02e-3, ...
                         'LeadIn_s', 0, 'TailOut_s', 0, ...
                         'AllowUnsyncedBeam', true);
-                    
+
+                    % Yield after every finite DAQ waveform so Pause and
+                    % Cancel remain responsive within large Z layers.
+                    drawnow;
                 end
             catch ME
                 warning('Scan failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
@@ -302,21 +334,20 @@ function startScanMapping(hWP)
                 runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(rawPath,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS')), moveElapsed); %#ok<AGROW>
                 continue;
             end
+            if cancelledDuringLayer
+                scanEnd = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+                runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, ...
+                    size(rawPath,1), totalLength_um, estimatedTime_s, "cancelled", ...
+                    "Cancelled at a safe chunk boundary.", zDelta, scanStart, scanEnd, moveElapsed); %#ok<AGROW>
+                finalizeCancelledRun(hWP, runLog);
+                return;
+            end
             scanEnd = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             runLog.counts.layersCompleted = runLog.counts.layersCompleted + 1;
             runLog.layers(end+1) = buildLayerRecord(tileIdx, zIdx, zLocal, zWorld, size(rawPath,1), totalLength_um, estimatedTime_s, status, errMsg, zDelta, scanStart, scanEnd, moveElapsed); %#ok<AGROW>
             
-            drawnow % make sure pause updates
-
-            % ---- PAUSE HERE (safe boundary)
-            waitIfPaused(hWP);
-            
-            % ---- optional cancel check (future)
-            if isprop(hWP,'isCancelled') && hWP.isCancelled
-                warning('Scan cancelled by user.');
-                runLog.status = "cancelled";
-                runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
-                finalizeRunLog(hWP, runLog);
+            if waitAtSafeBoundary(hWP)
+                finalizeCancelledRun(hWP, runLog);
                 return;
             end
 
@@ -341,7 +372,7 @@ end
 
 
 % -------------------------------------------------------------------------
-function [zWorld, tf] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, zTraversalMode, maskZOffset_um)
+function [zWorld, tf] = findFirstExecutableZTarget(hWP, scanPaths, stack, zStep_um, zTraversalMode, maskZOffset_um)
     zWorld = NaN;
     tf = false;
 
@@ -368,6 +399,13 @@ function [zWorld, tf] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, z
         tilePaths = tilePaths(1:n);
         zLevels = zLevels(1:n);
 
+        selected = getSelectedZSliceIndices(hWP, zLevels);
+        tilePaths = tilePaths(selected);
+        zLevels = zLevels(selected);
+        if isempty(zLevels)
+            continue;
+        end
+
         switch zTraversalMode
             case "ascending"
                 [zLevels, order] = sort(zLevels, 'ascend');
@@ -378,7 +416,7 @@ function [zWorld, tf] = findFirstExecutableZTarget(scanPaths, stack, zStep_um, z
         end
         tilePaths = tilePaths(order);
 
-        firstIdx = find(~cellfun(@isempty, tilePaths), 1, 'first');
+        firstIdx = find(cellfun(@(p) ~isempty(p) && size(p,1) >= 2, tilePaths), 1, 'first');
         if isempty(firstIdx)
             continue;
         end
@@ -439,6 +477,51 @@ function waitIfPaused(app)
         drawnow;      % allows Pause/Resume/Cancel callbacks to run
         pause(0.05);  % light throttle, not a hard block
     end
+end
+
+function tf = waitAtSafeBoundary(app)
+% Process UI events and honor Pause/Cancel between finite DAQ chunks.
+    drawnow;
+    tf = isCancellationRequested(app);
+    if tf
+        setPauseButtonText(app, "Pause");
+        return;
+    end
+
+    waitIfPaused(app);
+    drawnow;
+    tf = isCancellationRequested(app);
+    if tf
+        setPauseButtonText(app, "Pause");
+    end
+end
+
+function tf = isCancellationRequested(app)
+    tf = false;
+    try
+        tf = logical(app.isCancelled);
+    catch
+    end
+end
+
+function setPauseButtonText(app, value)
+    try
+        if isprop(app, 'Pause_Button') && ~isempty(app.Pause_Button) && isvalid(app.Pause_Button)
+            app.Pause_Button.Text = value;
+        end
+    catch
+    end
+end
+
+function finalizeCancelledRun(hWP, runLog)
+    warning('Scan cancelled by user.');
+    hWP.isPaused = false;
+    setPauseButtonText(hWP, "Pause");
+    runLog.status = "cancelled";
+    runLog.events(end+1) = buildEvent('cancelled_by_user', 0, 0, ...
+        'Cancellation honored at a safe playback boundary.');
+    runLog.endedAt_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
+    finalizeRunLog(hWP, runLog);
 end
 
 function runLog = initRunLog(hWP, allTime_min, sliceTimes_min)
@@ -712,7 +795,14 @@ function out = summarizePlaybackPlan(hWP)
         zLevels = zLevels(:);
 
         numZ = min([numel(tilePaths), numel(tileMeta), numel(zLevels)]);
-        for zIdx = 1:numZ
+        tilePaths = tilePaths(1:numZ);
+        tileMeta = tileMeta(1:numZ);
+        zLevels = zLevels(1:numZ);
+        selected = getSelectedZSliceIndices(hWP, zLevels);
+        tilePaths = tilePaths(selected);
+        tileMeta = tileMeta(selected);
+        zLevels = zLevels(selected);
+        for zIdx = 1:numel(zLevels)
             pathXY = tilePaths{zIdx};
             if isempty(pathXY) || size(pathXY,1) < 2
                 continue;

@@ -50,6 +50,14 @@ function handleStartLineScans(app)
         return;
     end
 
+    % Capture the latest controls and reject an empty range before any
+    % hardware movement occurs.
+    syncZSliceSelectionFromUI(app);
+    if ~hasAnySelectedScanPaths(app)
+        issue(app, 'The selected Z-slice range contains no playable scan paths. Adjust the slice range and try again.');
+        return;
+    end
+
     % ---- Start scan ----
     try
         startScanMapping(app);
@@ -58,7 +66,36 @@ function handleStartLineScans(app)
         return;
     end
 
+    if isprop(app, 'isCancelled') && app.isCancelled
+        cancelled(app, 'Line scan sequence cancelled.');
+        return;
+    end
+
     success(app, 'Line scan sequence complete.');
+end
+
+function tf = hasAnySelectedScanPaths(app)
+tf = false;
+stack = app.hStacks;
+for t = 1:numel(stack.ScanPaths)
+    tile = stack.ScanPaths{t};
+    if isempty(tile) || ~iscell(tile) || t > numel(stack.ArbitraryZs)
+        continue;
+    end
+    if isrow(tile), tile = tile.'; end
+    zs = stack.ArbitraryZs{t};
+    zs = zs(:);
+    n = min(numel(tile), numel(zs));
+    tile = tile(1:n);
+    zs = zs(1:n);
+    selected = getSelectedZSliceIndices(app, zs);
+    for k = selected(:).'
+        if ~isempty(tile{k}) && size(tile{k},1) >= 2
+            tf = true;
+            return;
+        end
+    end
+end
 end
 
 function tf = hasAnyScanPaths(stack)
@@ -97,6 +134,14 @@ end
 function success(app, msg)
 try
     uialert(app.UIFigure, msg, 'Scan Complete', 'Icon', 'success');
+catch
+    disp(msg);
+end
+end
+
+function cancelled(app, msg)
+try
+    uialert(app.UIFigure, msg, 'Scan Cancelled', 'Icon', 'info');
 catch
     disp(msg);
 end

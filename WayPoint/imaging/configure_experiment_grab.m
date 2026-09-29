@@ -18,6 +18,10 @@ function out = configure_experiment_grab(experimentName, varargin)
 %   cfg = configure_experiment_grab('cortex-window');
 %   cfg = configure_experiment_grab('cortex-window', ...
 %       'BaseDir', '/Volumes/file directory');
+%   cfg = configure_experiment_grab('cortex-window', ...
+%       'BaseName', 'mouse12_predrug');
+%   cfg = configure_experiment_grab('cortex-window', ...
+%       'BaseName', 'mouse12_predrug', 'BaseNameOnly', true);
 %   out = configure_experiment_grab('cortex-window', 'RunGrab', true);
 %
 % Name-value options:
@@ -25,6 +29,9 @@ function out = configure_experiment_grab(experimentName, varargin)
 %   'BaseDir'        : base mount path (e.g. '/Volumes/file directory')
 %                      If empty, function attempts auto-detection.
 %   'YearFolder'     : numeric/string year folder (default: current year)
+%   'BaseName'       : custom file stem seed (separate from folder name)
+%   'BaseNameOnly'   : if true, use only BaseName/experimentName as stem
+%                      (no auto metadata suffixes)
 %   'EnsureChannel'  : channel index to force-save (default: 3)
 %   'RunGrab'        : if true, start one grab and patch TIFF metadata
 %   'ExtraMetadata'  : struct/string custom metadata to merge
@@ -43,6 +50,8 @@ function out = configure_experiment_grab(experimentName, varargin)
     ip.addParameter('YearFolder', year(datetime('today')), @(x) ...
         (isnumeric(x) && isscalar(x) && isfinite(x) && x >= 2000 && x <= 3000) || ...
         (ischar(x) || (isstring(x) && isscalar(x))));
+    ip.addParameter('BaseName', '', @(x)ischar(x) || (isstring(x) && isscalar(x)));
+    ip.addParameter('BaseNameOnly', false, @(x)islogical(x) || (isnumeric(x) && isscalar(x)));
     ip.addParameter('EnsureChannel', 3, @(x)isnumeric(x) && isscalar(x) && isfinite(x) && x >= 1 && mod(x,1)==0);
     ip.addParameter('RunGrab', false, @(x)islogical(x) || (isnumeric(x) && isscalar(x)));
     ip.addParameter('ExtraMetadata', struct(), @(x)isstruct(x) || ischar(x) || (isstring(x) && isscalar(x)));
@@ -53,8 +62,10 @@ function out = configure_experiment_grab(experimentName, varargin)
     hSI = resolveHSI(ip.Results.HSI);
     ensureChannel = double(ip.Results.EnsureChannel);
     runGrab = logical(ip.Results.RunGrab);
+    baseNameOnly = logical(ip.Results.BaseNameOnly);
     timeoutSec = double(ip.Results.TimeoutSec);
     yearFolder = normalizeYearFolder(ip.Results.YearFolder);
+    baseNameInput = strtrim(char(string(ip.Results.BaseName)));
 
     applySaveSettings(hSI, ensureChannel);
 
@@ -76,11 +87,23 @@ function out = configure_experiment_grab(experimentName, varargin)
     md.experiment_dir = experimentDir;
     md.raw_dir = rawDir;
     md.log_dir = logDir;
+    md.base_name_input = baseNameInput;
+    md.base_name_only = baseNameOnly;
     md.generated_local = char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss'));
     md.tiff_note = ['ScanImage native metadata stays in TIFF tags; ', ...
         'CustomMetadataJSON is appended by grab_and_save_with_metadata.'];
 
-    requestedStem = buildStemFromMetadata(experimentName, md);
+    if isempty(baseNameInput)
+        stemSeed = experimentName;
+    else
+        stemSeed = baseNameInput;
+    end
+
+    if baseNameOnly
+        requestedStem = sanitizeStem(stemSeed);
+    else
+        requestedStem = buildStemFromMetadata(stemSeed, md);
+    end
     cfg = configure_grab_basename(saveDir, requestedStem, 'HSI', hSI, 'UserMetadata', md);
 
     out = struct();
@@ -90,6 +113,8 @@ function out = configure_experiment_grab(experimentName, varargin)
     out.saveDir = saveDir;
     out.baseNameRequested = requestedStem;
     out.baseNameResolved = cfg.baseNameResolved;
+    out.baseNameInput = baseNameInput;
+    out.baseNameOnly = baseNameOnly;
     out.metadata = cfg.metadata;
     out.cfg = cfg;
     out.channelSave = hSI.hChannels.channelSave;

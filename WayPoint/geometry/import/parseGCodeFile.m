@@ -34,6 +34,7 @@ function data = parseGCodeFile(filePath, varargin)
     moves = zeros(segChunk, 6); % [x0 y0 z0 x1 y1 z1]
     moveIsTravel = false(segChunk, 1);
     moveIsExtrusion = false(segChunk, 1);
+    moveIsRapid = false(segChunk, 1);
     nMove = 0;
 
     line = fgetl(fid);
@@ -68,10 +69,12 @@ function data = parseGCodeFile(filePath, varargin)
                                     moves(end+segChunk, :) = 0;
                                     moveIsTravel(end+segChunk, 1) = false;
                                     moveIsExtrusion(end+segChunk, 1) = false;
+                                    moveIsRapid(end+segChunk, 1) = false;
                                 end
                                 moves(nMove, :) = move;
                                 moveIsTravel(nMove) = logical(isTravelMove);
                                 moveIsExtrusion(nMove) = logical(isExtrusionMove);
+                                moveIsRapid(nMove) = cmdNum == 0;
                             end
                             if isExtrusionMove
                                 nSeg = nSeg + 1;
@@ -111,6 +114,7 @@ function data = parseGCodeFile(filePath, varargin)
             'moves', zeros(0,6), ...
             'moveIsTravel', false(0,1), ...
             'moveIsExtrusion', false(0,1), ...
+            'moveIsRapid', false(0,1), ...
             'xyz', zeros(0,3));
         return;
     end
@@ -123,12 +127,14 @@ function data = parseGCodeFile(filePath, varargin)
     moves = moves(1:nMove, :);
     moveIsTravel = moveIsTravel(1:nMove);
     moveIsExtrusion = moveIsExtrusion(1:nMove);
+    moveIsRapid = moveIsRapid(1:nMove);
     xyz = [moves(:,1:3); moves(:,4:6)];
     data = struct( ...
         'segments', segs, ...
         'moves', moves, ...
         'moveIsTravel', moveIsTravel, ...
         'moveIsExtrusion', moveIsExtrusion, ...
+        'moveIsRapid', moveIsRapid, ...
         'xyz', xyz);
 end
 
@@ -185,17 +191,16 @@ function [cmdType, cmdNum] = parseCommandFast(s)
 
     n = length(s);
     i = 1;
-    while i <= n && isspace(s(i))
+    % Accept optional line numbers/checksum prefixes (for example N42 G1).
+    while i <= n
+        c = upper(s(i));
+        if (c == 'G' || c == 'M' || c == 'T') && ...
+                i < n && (isstrprop(s(i+1), 'digit') || isspace(s(i+1)) || s(i+1) == '+' || s(i+1) == '-')
+            break;
+        end
         i = i + 1;
     end
-    if i > n
-        return;
-    end
-
-    c = upper(s(i));
-    if c ~= 'G' && c ~= 'M' && c ~= 'T'
-        return;
-    end
+    if i > n, return; end
     cmdType = c;
     i = i + 1;
 

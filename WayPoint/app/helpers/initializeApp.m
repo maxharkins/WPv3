@@ -62,6 +62,12 @@ function initializeApp(hWP)
     hWP.aPath = Path();
     hWP.iPath = Path();
 
+    % Optional execution-time slice filter. It defaults to all slices and
+    % is kept outside the saved App Designer component schema.
+    hWP.Settings.ZSliceSelection = struct( ...
+        'Enabled', false, 'FirstIndex', 1, 'LastIndex', Inf);
+    setupZSliceSelectionUI(hWP);
+
 
     hWP.slices = struct( ...
         'nodes', struct('XY',[], 'YZ',[], 'ZX',[]), ...

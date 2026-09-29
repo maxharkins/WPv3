@@ -267,7 +267,6 @@ classdef Stacks < handle & matlab.mixin.SetGet
         end
 
         function obj = getScanPaths(obj, app)
-            prepSequence(app)
             obj.isEffectively2D = false; % initialize
 
             importedExt = "";
@@ -276,11 +275,22 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 [~,~,ext] = fileparts(app.Settings.ImportedFilePath);
                 importedExt = string(lower(ext));
             end
-            if any(importedExt == [".gcode", ".gco", ".nc"]) && hasAnyPlayableScanPaths(obj.ScanPaths)
-                fprintf('[Stacks] Using precomputed G-code scan paths from import (no regeneration).\n');
+            isGCodeImport = any(importedExt == [".gcode", ".gco", ".nc"]);
+            isReversibleScanPathImport = importedExt == ".txt" && ...
+                isstruct(obj.LastImportStats) && isfield(obj.LastImportStats, 'source') && ...
+                strcmpi(obj.LastImportStats.source, 'scanpath_txt') && ...
+                isfield(obj.LastImportStats, 'hasStagePath') && obj.LastImportStats.hasStagePath;
+            if (isGCodeImport || isReversibleScanPathImport) && hasAnyPlayableScanPaths(obj.ScanPaths)
+                fprintf('[Stacks] Using precomputed imported scan paths (no regeneration).\n');
+                obj.StagePath = app.aPath.Coordinates;
+                obj.FramesPerSlice = app.Settings.FramesPerSlice;
+                obj.PixelDwellTime_ms = app.Settings.PixelDwellTime_ms;
+                obj.Power_pct = app.Settings.Power_pct;
                 obj.dispStats();
                 return;
             end
+
+            prepSequence(app)
 
             if obj.isMeshScan
                 % ======================================================
@@ -435,6 +445,13 @@ classdef Stacks < handle & matlab.mixin.SetGet
         
             for tileIdx = 1:numTiles
                 fprintf(fid, '--- Tile %d ---\n', tileIdx);
+
+                stagePos = [NaN NaN NaN];
+                if ~isempty(obj.StagePath) && size(obj.StagePath,1) >= tileIdx
+                    available = min(3, size(obj.StagePath,2));
+                    stagePos(1:available) = obj.StagePath(tileIdx,1:available);
+                end
+                fprintf(fid, 'Stage-Position: %.15g %.15g %.15g\n', stagePos);
         
                 % Expect tileData as {numZs x 1}; accept row and coerce in memory if needed
                 tileData = obj.ScanPaths{tileIdx};
@@ -473,12 +490,21 @@ classdef Stacks < handle & matlab.mixin.SetGet
                         continue;
                     end
         
-                    % pathXY can be N x 2 (XY) or N x 3 (XYZ primitive).
-                    if size(pathXY,2) >= 3
-                        fprintf(fid, '%f %f %f\n', pathXY(:,1:3).');
-                    else
-                        fprintf(fid, '%f %f\n', pathXY(:,1:2).');
+                    % New files always carry XYZ + a travel/laser-off flag.
+                    % The importer still accepts legacy two- and three-column files.
+                    xyz = pathXY(:,1:min(3,size(pathXY,2)));
+                    if size(xyz,2) < 3
+                        xyz(:,3) = zval;
                     end
+                    isTravel = zeros(size(xyz,1),1);
+                    if isprop(obj, 'ScanMeta') && numel(obj.ScanMeta) >= tileIdx && ...
+                            ~isempty(obj.ScanMeta{tileIdx}) && numel(obj.ScanMeta{tileIdx}) >= zIdx
+                        candidate = obj.ScanMeta{tileIdx}{zIdx};
+                        if numel(candidate) == size(xyz,1)
+                            isTravel = logical(candidate(:));
+                        end
+                    end
+                    fprintf(fid, '%.15g %.15g %.15g %d\n', [xyz, isTravel].');
                     fprintf(fid, '\n');
                 end
         
@@ -522,6 +548,9 @@ classdef Stacks < handle & matlab.mixin.SetGet
             currentTile = {};
             currentMeta = {};
             currentZs   = [];
+            currentStage = [NaN NaN NaN];
+            stagePositions = zeros(0,3);
+            sawTravelMetadata = false;
             expectedNumZ = [];
         
             line = fgetl(fid);
@@ -551,8 +580,16 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     currentTile = {};
                     currentMeta = {};
                     currentZs   = [];
+                    currentStage = [NaN NaN NaN];
                     expectedNumZ = [];
-        
+
+                elseif startsWith(s, 'Stage-Position:')
+                    vals = sscanf(s, 'Stage-Position: %f %f %f');
+                    if numel(vals) == 3
+                        currentStage = vals(:).';
+                        stagePositions(tileIdx,1:3) = currentStage;
+                    end
+
                 elseif startsWith(s, 'NumZs:')
                     nz = sscanf(s, 'NumZs: %d');
                     if ~isempty(nz) && isscalar(nz) && nz >= 0
@@ -613,7 +650,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                         end
         
                         vals = sscanf(t,'%f');
-                        if numel(vals) ~= 2 && numel(vals) ~= 3
+                        if ~ismember(numel(vals), [2 3 4])
                             error('Malformed coordinate line: "%s"', t);
                         end
 
@@ -632,7 +669,12 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     end
         
                     currentTile{zIdx,1} = coords;
-                    if ~isempty(coords) && size(coords,2) >= 3 && isfinite(currentZs(zIdx))
+                    if ~isempty(coords) && size(coords,2) >= 4
+                        sawTravelMetadata = true;
+                        currentMeta{zIdx,1} = logical(coords(:,4));
+                        coords = coords(:,1:3);
+                        currentTile{zIdx,1} = coords;
+                    elseif ~isempty(coords) && size(coords,2) >= 3 && isfinite(currentZs(zIdx))
                         currentMeta{zIdx,1} = abs(coords(:,3) - currentZs(zIdx)) > 1e-9;
                     else
                         currentMeta{zIdx,1} = zeros(size(coords,1),1);
@@ -641,14 +683,19 @@ classdef Stacks < handle & matlab.mixin.SetGet
                     % Accumulate global XYZ
                     if ~isempty(coords)
                         if size(coords,2) >= 3
-                            coords_XYZ = [coords_XYZ; coords(:,1:3)]; %#ok<AGROW>
+                            xyz = coords(:,1:3);
                         else
                             zval = currentZs(zIdx);
                             if ~isnan(zval)
-                                coords_XYZ = [coords_XYZ; ...
-                                              coords(:,1:2), repmat(zval,size(coords,1),1)]; %#ok<AGROW>
+                                xyz = [coords(:,1:2), repmat(zval,size(coords,1),1)];
+                            else
+                                xyz = zeros(0,3);
                             end
                         end
+                        if ~isempty(xyz) && all(isfinite(currentStage(1:2)))
+                            xyz(:,1:2) = xyz(:,1:2) + currentStage(1:2);
+                        end
+                        coords_XYZ = [coords_XYZ; xyz]; %#ok<AGROW>
                     end
                 end
         
@@ -675,36 +722,43 @@ classdef Stacks < handle & matlab.mixin.SetGet
             obj.ScanMeta    = scanMeta(:);
             obj.ArbitraryZs = allZs(:);
 
+            hasStagePath = tileIdx > 0 && size(stagePositions,1) >= tileIdx && ...
+                all(all(isfinite(stagePositions(1:tileIdx,1:2))));
+            if hasStagePath
+                obj.StagePath = stagePositions(1:tileIdx,:);
+                if ~isempty(obj.hWP.aPath)
+                    obj.hWP.aPath.Coordinates = obj.StagePath;
+                end
+            end
+            obj.LastImportStats = struct( ...
+                'source', 'scanpath_txt', ...
+                'numTiles', numel(obj.ScanPaths), ...
+                'numLayers', sum(cellfun(@numel, obj.ScanPaths)), ...
+                'hasStagePath', hasStagePath, ...
+                'hasTravelMetadata', sawTravelMetadata);
+
             
             % ============================================================
             % BOUNDING-BOX CENTERING (XY AND Z)
             % ============================================================
             
-            % ---- XY bounding-box centering
-            xyMin = min(coords_XYZ(:,1:2), [], 1);
-            xyMax = max(coords_XYZ(:,1:2), [], 1);
-            xyCenter = (xyMin + xyMax) / 2;
-            coords_XYZ(:,1:2) = coords_XYZ(:,1:2) - xyCenter;
-            
-            % ---- Z bounding-box centering
-            zMin = min(coords_XYZ(:,3));
-            zMax = max(coords_XYZ(:,3));
-            zCenter = (zMin + zMax) / 2;
-            coords_XYZ(:,3) = coords_XYZ(:,3) - zCenter;
-            
-            % ---- Apply SAME Z shift to ArbitraryZs
-            if ~isempty(obj.ArbitraryZs)
-                valid = ~isnan(obj.ArbitraryZs{:});
-                obj.ArbitraryZs{:}(valid) = obj.ArbitraryZs{:}(valid) - zCenter;
-            end        
-            
-            % ============================================================
-            % NORMALIZE INTO MASK-LOCAL FRAME
-            % ============================================================
-            if ~isempty(coords_XYZ)        
-                % ---- Z shift so min(Z) = 0
-                zMin = min(coords_XYZ(:,3));
-                coords_XYZ(:,3) = coords_XYZ(:,3) - zMin;
+            if ~isempty(coords_XYZ)
+                if ~hasStagePath
+                    % Legacy files did not retain tile positions. Keep their
+                    % historical plotting normalization; prep will regenerate
+                    % executable paths from these nodes.
+                    xyMin = min(coords_XYZ(:,1:2), [], 1);
+                    xyMax = max(coords_XYZ(:,1:2), [], 1);
+                    coords_XYZ(:,1:2) = coords_XYZ(:,1:2) - (xyMin + xyMax) / 2;
+                    zOrigin = min(coords_XYZ(:,3));
+                    coords_XYZ(:,3) = coords_XYZ(:,3) - zOrigin;
+                    for t = 1:numel(obj.ArbitraryZs)
+                        zs = obj.ArbitraryZs{t};
+                        valid = isfinite(zs);
+                        zs(valid) = zs(valid) - zOrigin;
+                        obj.ArbitraryZs{t} = zs;
+                    end
+                end
         
                 % ========================================================
                 % ASSIGN TO MASK NODES FOR PLOTTING
@@ -716,7 +770,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 warning('No XYZ coordinates reconstructed from %s', filename);
             end
         
-            fprintf('ScanPaths loaded and centered from %s\n', filename);
+            fprintf('ScanPaths loaded from %s\n', filename);
         
         end
 
@@ -741,6 +795,16 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 return;
             end
 
+            % CNC/laser G-code often has no E axis. In that dialect G1 is
+            % the working move and G0 is travel; preserve laser-off travel
+            % semantics instead of importing the entire file as blanked.
+            usedG1Fallback = false;
+            if ~any(moveIsExtrusion) && isfield(g, 'moveIsRapid')
+                moveIsTravel = logical(g.moveIsRapid(:));
+                moveIsExtrusion = ~moveIsTravel;
+                usedG1Fallback = any(moveIsExtrusion);
+            end
+
             moveLen = hypot(moves(:,4) - moves(:,1), moves(:,5) - moves(:,2));
             zDelta = abs(moves(:,6) - moves(:,3));
             hopTol = 1e-9;
@@ -751,6 +815,7 @@ classdef Stacks < handle & matlab.mixin.SetGet
                 'numExtrusionMoves', sum(moveIsExtrusion), ...
                 'numTravelMoves', sum(moveIsTravel), ...
                 'numTravelHopMoves', sum(travelHopMask), ...
+                'usedG1AsScanFallback', usedG1Fallback, ...
                 'totalLength_um', sum(moveLen), ...
                 'extrusionLength_um', sum(moveLen(moveIsExtrusion)), ...
                 'travelLength_um', sum(moveLen(moveIsTravel)));

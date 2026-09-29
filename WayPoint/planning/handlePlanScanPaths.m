@@ -29,6 +29,8 @@ function handlePlanScanPaths(app)
         return;
     end
 
+    refreshZSliceSelectionUI(app, false);
+
     disp('Prepped ScanPaths.');
     success(app, 'ScanPaths planning complete.');
 end

@@ -102,7 +102,10 @@ s = [0; cumsum(hypot(diff(x), diff(y)))];
 L = s(end);
 assert(L > 0, 'Zero-length path.');
 
-nExpose = max(1, ceil(L / spacing_um_target));
+% ScanImage evaluates the stimulus through interpolation, which requires at
+% least two source samples. Short imported G-code segments can be smaller
+% than one raster spacing, so never build a one-sample stimulus.
+nExpose = max(2, ceil(L / spacing_um_target));
 spacing_um_eff = L / nExpose;
 sExpose = ((0:nExpose-1)' + 0.5) * spacing_um_eff;
 xExpose_um = interp1(s, x, sExpose, 'linear');
@@ -244,6 +247,12 @@ end
 % dabs.ni.daqmx.Task/writeAnalogData requires double-precision data.
 Vao = double(Vao);
 
+% Create this cleanup before task/reservation cleanups so it executes last
+% (LIFO), after the AO task is stopped and ScanImage owns its resources again.
+if useBeam
+    cleanupBeam = onCleanup(@() localSetBeamOff(bh)); %#ok<NASGU>
+end
+
 % Register + unreserve resources for task ownership
 didUnreserve = false(1, numel(hAOList));
 cleanupReserve = onCleanup(@() localRestoreReservations(hAOList, hUserList, didUnreserve)); %#ok<NASGU>
@@ -274,15 +283,15 @@ tAO.start();
 tAO.waitUntilTaskDone();
 elapsed_s = toc;
 
-if strcmp(beamMode, 'software_fallback')
-    try, bh.setPowerFraction(0); catch, end %#ok<TRYNC>
-end
-
 for k = 1:numel(hAOList)
     if didUnreserve(k)
         hAOList{k}.reserve(hUserList{k});
         didUnreserve(k) = false;
     end
+end
+
+if useBeam
+    localSetBeamOff(bh);
 end
 
 if doPark
@@ -307,6 +316,12 @@ end
 
 function [xx, yy] = localStimPath(tt, x, y, Fs)
     t = tt(:);
+    if numel(x) == 1
+        % Defensive fallback for callers/models that provide one point.
+        xx = repmat(x(1), size(t));
+        yy = repmat(y(1), size(t));
+        return;
+    end
     tx = (0:numel(x)-1)' / Fs;
     xx = interp1(tx, x, t, 'linear', 'extrap');
     yy = interp1(tx, y, t, 'linear', 'extrap');
@@ -353,4 +368,15 @@ function localCleanupTask(tTask)
     if isempty(tTask) || ~isvalid(tTask), return; end
     try, tTask.stop();  end %#ok<TRYNC>
     try, tTask.clear(); end %#ok<TRYNC>
+end
+
+function localSetBeamOff(beamHandle)
+    if isempty(beamHandle)
+        return;
+    end
+    try
+        beamHandle.setPowerFraction(0);
+    catch
+        % Best effort during error/interrupt cleanup.
+    end
 end

@@ -39,6 +39,14 @@ function [allTime_min, sliceTimes_min] = estimateScanMapTime(hWP)
         zLevels = zLevels(:);
 
         numZ = min([numel(tilePaths), numel(zLevels), numel(tileMeta)]);
+        tilePaths = tilePaths(1:numZ);
+        tileMeta = tileMeta(1:numZ);
+        zLevels = zLevels(1:numZ);
+        selected = getSelectedZSliceIndices(hWP, zLevels);
+        tilePaths = tilePaths(selected);
+        tileMeta = tileMeta(selected);
+        zLevels = zLevels(selected);
+        numZ = numel(selected);
         sliceTimes_min{tileIdx} = cell(numZ,1);
 
         tileTime_s = 0;
