@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="660" viewBox="0 0 900 660">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Arial,sans-serif;fill:#202124}.grid{stroke:#e4e7eb;stroke-width:1}.axis{stroke:#333;stroke-width:1.5}.fit{stroke:#d23f31;stroke-width:3}.one{stroke:#687386;stroke-width:2;stroke-dasharray:7 6}.pt{fill:#2878b5;fill-opacity:.55}</style>
+<text x="450" y="30" text-anchor="middle" font-size="21" font-weight="bold">Predicted vs actual scan time</text>
+<line class='grid' x1='90' y1='0.5' x2='90' y2='570'/><line class='grid' x1='90' y1='570' x2='860' y2='570'/><text x='90' y='595' text-anchor='middle' font-size='13'>0.5</text><text x='78' y='575' text-anchor='end' font-size='13'>0.5</text>
+<line class='grid' x1='175.555555555556' y1='1' x2='175.555555555556' y2='570'/><line class='grid' x1='90' y1='515' x2='860' y2='515'/><text x='175.555555555556' y='595' text-anchor='middle' font-size='13'>1.0</text><text x='78' y='520' text-anchor='end' font-size='13'>1.0</text>
+<line class='grid' x1='261.111111111111' y1='1.5' x2='261.111111111111' y2='570'/><line class='grid' x1='90' y1='460' x2='860' y2='460'/><text x='261.111111111111' y='595' text-anchor='middle' font-size='13'>1.5</text><text x='78' y='465' text-anchor='end' font-size='13'>1.5</text>
+<line class='grid' x1='346.666666666667' y1='2' x2='346.666666666667' y2='570'/><line class='grid' x1='90' y1='405' x2='860' y2='405'/><text x='346.666666666667' y='595' text-anchor='middle' font-size='13'>2.0</text><text x='78' y='410' text-anchor='end' font-size='13'>2.0</text>
+<line class='grid' x1='432.222222222222' y1='2.5' x2='432.222222222222' y2='570'/><line class='grid' x1='90' y1='350' x2='860' y2='350'/><text x='432.222222222222' y='595' text-anchor='middle' font-size='13'>2.5</text><text x='78' y='355' text-anchor='end' font-size='13'>2.5</text>
+<line class='grid' x1='517.777777777778' y1='3' x2='517.777777777778' y2='570'/><line class='grid' x1='90' y1='295' x2='860' y2='295'/><text x='517.777777777778' y='595' text-anchor='middle' font-size='13'>3.0</text><text x='78' y='300' text-anchor='end' font-size='13'>3.0</text>
+<line class='grid' x1='603.333333333333' y1='3.5' x2='603.333333333333' y2='570'/><line class='grid' x1='90' y1='240' x2='860' y2='240'/><text x='603.333333333333' y='595' text-anchor='middle' font-size='13'>3.5</text><text x='78' y='245' text-anchor='end' font-size='13'>3.5</text>
+<line class='grid' x1='688.888888888889' y1='4' x2='688.888888888889' y2='570'/><line class='grid' x1='90' y1='185' x2='860' y2='185'/><text x='688.888888888889' y='595' text-anchor='middle' font-size='13'>4.0</text><text x='78' y='190' text-anchor='end' font-size='13'>4.0</text>
+<line class='grid' x1='774.444444444444' y1='4.5' x2='774.444444444444' y2='570'/><line class='grid' x1='90' y1='130' x2='860' y2='130'/><text x='774.444444444444' y='595' text-anchor='middle' font-size='13'>4.5</text><text x='78' y='135' text-anchor='end' font-size='13'>4.5</text>
+<line class='grid' x1='860' y1='5' x2='860' y2='570'/><line class='grid' x1='90' y1='75' x2='860' y2='75'/><text x='860' y='595' text-anchor='middle' font-size='13'>5.0</text><text x='78' y='80' text-anchor='end' font-size='13'>5.0</text>
+<line class='axis' x1='90' y1='5' x2='90' y2='570'/><line class='axis' x1='90' y1='570' x2='860' y2='570'/>
+<line class='one' x1='90' y1='570' x2='860' y2='75'/>
+<line class='fit' x1='90' y1='-4333.73854367335' x2='380.888888888889' y2='-21163.7385436734'/>
+<circle class='pt' cx='251.528888888889' cy='281.36' r='3.3'/>
+<circle class='pt' cx='246.053333333333' cy='280.15' r='3.3'/>
+<circle class='pt' cx='240.92' cy='296.1' r='3.3'/>
+<circle class='pt' cx='236.642222222222' cy='315.02' r='3.3'/>
+<circle class='pt' cx='232.706666666667' cy='327.67' r='3.3'/>
+<circle class='pt' cx='228.6' cy='332.07' r='3.3'/>
+<circle class='pt' cx='224.835555555556' cy='338.12' r='3.3'/>
+<circle class='pt' cx='221.242222222222' cy='319.97' r='3.3'/>
+<circle class='pt' cx='217.477777777778' cy='339.77' r='3.3'/>
+<circle class='pt' cx='213.028888888889' cy='324.37' r='3.3'/>
+<circle class='pt' cx='204.473333333333' cy='343.84' r='3.3'/>
+<circle class='pt' cx='195.062222222222' cy='356.05' r='3.3'/>
+<circle class='pt' cx='181.202222222222' cy='387.07' r='3.3'/>
+<circle class='pt' cx='169.566666666667' cy='390.04' r='3.3'/>
+<circle class='pt' cx='164.946666666667' cy='390.48' r='3.3'/>
+<circle class='pt' cx='162.037777777778' cy='411.27' r='3.3'/>
+<circle class='pt' cx='159.984444444444' cy='395.76' r='3.3'/>
+<circle class='pt' cx='158.615555555556' cy='398.07' r='3.3'/>
+<circle class='pt' cx='157.588888888889' cy='418.97' r='3.3'/>
+<circle class='pt' cx='156.048888888889' cy='405.99' r='3.3'/>
+<circle class='pt' cx='155.364444444444' cy='407.2' r='3.3'/>
+<circle class='pt' cx='153.824444444444' cy='408.96' r='3.3'/>
+<circle class='pt' cx='152.113333333333' cy='430.74' r='3.3'/>
+<circle class='pt' cx='150.744444444444' cy='434.92' r='3.3'/>
+<circle class='pt' cx='149.375555555556' cy='436.57' r='3.3'/>
+<circle class='pt' cx='147.664444444444' cy='427' r='3.3'/>
+<circle class='pt' cx='145.611111111111' cy='441.63' r='3.3'/>
+<circle class='pt' cx='143.044444444444' cy='423.59' r='3.3'/>
+<circle class='pt' cx='140.135555555556' cy='424.91' r='3.3'/>
+<circle class='pt' cx='136.371111111111' cy='427.11' r='3.3'/>
+<circle class='pt' cx='133.633333333333' cy='447.9' r='3.3'/>
+<circle class='pt' cx='131.751111111111' cy='436.57' r='3.3'/>
+<circle class='pt' cx='130.724444444444' cy='456.92' r='3.3'/>
+<circle class='pt' cx='130.04' cy='461.54' r='3.3'/>
+<circle class='pt' cx='129.697777777778' cy='461.43' r='3.3'/>
+<circle class='pt' cx='129.868888888889' cy='461.65' r='3.3'/>
+<circle class='pt' cx='130.553333333333' cy='460.66' r='3.3'/>
+<circle class='pt' cx='131.751111111111' cy='459.34' r='3.3'/>
+<circle class='pt' cx='133.12' cy='457.36' r='3.3'/>
+<circle class='pt' cx='134.146666666667' cy='453.4' r='3.3'/>
+<circle class='pt' cx='134.831111111111' cy='454.17' r='3.3'/>
+<circle class='pt' cx='135.344444444444' cy='433.49' r='3.3'/>
+<circle class='pt' cx='136.2' cy='425.9' r='3.3'/>
+<circle class='pt' cx='136.371111111111' cy='446.03' r='3.3'/>
+<circle class='pt' cx='136.713333333333' cy='451.86' r='3.3'/>
+<circle class='pt' cx='137.226666666667' cy='424.14' r='3.3'/>
+<circle class='pt' cx='137.568888888889' cy='427.77' r='3.3'/>
+<circle class='pt' cx='138.253333333333' cy='443.61' r='3.3'/>
+<circle class='pt' cx='138.424444444444' cy='442.62' r='3.3'/>
+<circle class='pt' cx='138.766666666667' cy='448.23' r='3.3'/>
+<circle class='pt' cx='139.451111111111' cy='449.66' r='3.3'/>
+<circle class='pt' cx='140.135555555556' cy='427.44' r='3.3'/>
+<circle class='pt' cx='140.991111111111' cy='426.34' r='3.3'/>
+<circle class='pt' cx='137.911111111111' cy='423.7' r='3.3'/>
+<circle class='pt' cx='136.2' cy='445.59' r='3.3'/>
+<circle class='pt' cx='137.911111111111' cy='427.66' r='3.3'/>
+<circle class='pt' cx='140.82' cy='423.15' r='3.3'/>
+<circle class='pt' cx='143.9' cy='420.95' r='3.3'/>
+<circle class='pt' cx='146.637777777778' cy='433.49' r='3.3'/>
+<circle class='pt' cx='149.033333333333' cy='427.55' r='3.3'/>
+<circle class='pt' cx='151.942222222222' cy='433.27' r='3.3'/>
+<circle class='pt' cx='155.193333333333' cy='428.87' r='3.3'/>
+<circle class='pt' cx='158.273333333333' cy='425.02' r='3.3'/>
+<circle class='pt' cx='162.037777777778' cy='397.41' r='3.3'/>
+<circle class='pt' cx='165.802222222222' cy='408.08' r='3.3'/>
+<circle class='pt' cx='169.908888888889' cy='395.76' r='3.3'/>
+<circle class='pt' cx='174.015555555556' cy='353.85' r='3.3'/>
+<circle class='pt' cx='178.122222222222' cy='375.52' r='3.3'/>
+<circle class='pt' cx='182.057777777778' cy='386.08' r='3.3'/>
+<circle class='pt' cx='186.164444444444' cy='358.14' r='3.3'/>
+<circle class='pt' cx='190.271111111111' cy='370.9' r='3.3'/>
+<circle class='pt' cx='194.548888888889' cy='378.38' r='3.3'/>
+<circle class='pt' cx='199.168888888889' cy='372.55' r='3.3'/>
+<circle class='pt' cx='203.275555555556' cy='367.27' r='3.3'/>
+<circle class='pt' cx='207.211111111111' cy='361.88' r='3.3'/>
+<circle class='pt' cx='210.975555555556' cy='356.93' r='3.3'/>
+<circle class='pt' cx='214.911111111111' cy='352.42' r='3.3'/>
+<circle class='pt' cx='218.846666666667' cy='347.47' r='3.3'/>
+<circle class='pt' cx='222.782222222222' cy='319.86' r='3.3'/>
+<circle class='pt' cx='227.573333333333' cy='313.7' r='3.3'/>
+<circle class='pt' cx='232.364444444444' cy='306.55' r='3.3'/>
+<circle class='pt' cx='236.984444444444' cy='302.04' r='3.3'/>
+<circle class='pt' cx='241.604444444444' cy='291.59' r='3.3'/>
+<circle class='pt' cx='246.053333333333' cy='287.85' r='3.3'/>
+<circle class='pt' cx='250.502222222222' cy='299.18' r='3.3'/>
+<circle class='pt' cx='254.78' cy='277.73' r='3.3'/>
+<circle class='pt' cx='258.886666666667' cy='273.11' r='3.3'/>
+<circle class='pt' cx='262.822222222222' cy='262.88' r='3.3'/>
+<circle class='pt' cx='266.928888888889' cy='261.23' r='3.3'/>
+<circle class='pt' cx='270.864444444444' cy='258.48' r='3.3'/>
+<circle class='pt' cx='274.8' cy='252.87' r='3.3'/>
+<circle class='pt' cx='278.735555555556' cy='235.49' r='3.3'/>
+<circle class='pt' cx='282.842222222222' cy='241.76' r='3.3'/>
+<circle class='pt' cx='286.777777777778' cy='252.76' r='3.3'/>
+<circle class='pt' cx='290.542222222222' cy='251.44' r='3.3'/>
+<circle class='pt' cx='294.135555555556' cy='250.01' r='3.3'/>
+<circle class='pt' cx='297.386666666667' cy='246.05' r='3.3'/>
+<circle class='pt' cx='300.466666666667' cy='241.1' r='3.3'/>
+<circle class='pt' cx='303.546666666667' cy='213.38' r='3.3'/>
+<circle class='pt' cx='305.6' cy='230.65' r='3.3'/>
+<circle class='pt' cx='307.995555555556' cy='231.42' r='3.3'/>
+<circle class='pt' cx='310.391111111111' cy='208.43' r='3.3'/>
+<circle class='pt' cx='313.984444444444' cy='203.37' r='3.3'/>
+<circle class='pt' cx='317.235555555556' cy='198.86' r='3.3'/>
+<circle class='pt' cx='320.144444444444' cy='195.67' r='3.3'/>
+<circle class='pt' cx='322.882222222222' cy='189.51' r='3.3'/>
+<circle class='pt' cx='325.448888888889' cy='184.12' r='3.3'/>
+<circle class='pt' cx='328.186666666667' cy='179.72' r='3.3'/>
+<circle class='pt' cx='331.951111111111' cy='177.52' r='3.3'/>
+<circle class='pt' cx='334.517777777778' cy='171.25' r='3.3'/>
+<circle class='pt' cx='337.426666666667' cy='170.15' r='3.3'/>
+<circle class='pt' cx='340.335555555556' cy='185.11' r='3.3'/>
+<circle class='pt' cx='343.073333333333' cy='187.53' r='3.3'/>
+<circle class='pt' cx='345.468888888889' cy='164.1' r='3.3'/>
+<circle class='pt' cx='347.864444444444' cy='157.28' r='3.3'/>
+<circle class='pt' cx='350.431111111111' cy='154.75' r='3.3'/>
+<circle class='pt' cx='352.655555555556' cy='147.27' r='3.3'/>
+<circle class='pt' cx='354.366666666667' cy='160.69' r='3.3'/>
+<circle class='pt' cx='355.906666666667' cy='143.42' r='3.3'/>
+<circle class='pt' cx='357.275555555556' cy='147.49' r='3.3'/>
+<circle class='pt' cx='358.815555555556' cy='159.92' r='3.3'/>
+<circle class='pt' cx='360.526666666667' cy='144.96' r='3.3'/>
+<circle class='pt' cx='362.066666666667' cy='141.77' r='3.3'/>
+<circle class='pt' cx='363.606666666667' cy='139.79' r='3.3'/>
+<circle class='pt' cx='364.633333333333' cy='151.78' r='3.3'/>
+<circle class='pt' cx='365.66' cy='130.66' r='3.3'/>
+<circle class='pt' cx='366.344444444444' cy='134.07' r='3.3'/>
+<circle class='pt' cx='366.857777777778' cy='128.9' r='3.3'/>
+<circle class='pt' cx='366.857777777778' cy='129.67' r='3.3'/>
+<circle class='pt' cx='367.2' cy='133.3' r='3.3'/>
+<circle class='pt' cx='367.371111111111' cy='134.18' r='3.3'/>
+<circle class='pt' cx='367.713333333333' cy='134.07' r='3.3'/>
+<circle class='pt' cx='367.884444444444' cy='129.56' r='3.3'/>
+<circle class='pt' cx='368.226666666667' cy='128.9' r='3.3'/>
+<circle class='pt' cx='368.911111111111' cy='126.15' r='3.3'/>
+<circle class='pt' cx='369.595555555556' cy='127.91' r='3.3'/>
+<circle class='pt' cx='370.28' cy='140.23' r='3.3'/>
+<circle class='pt' cx='371.135555555556' cy='123.29' r='3.3'/>
+<circle class='pt' cx='371.991111111111' cy='130.66' r='3.3'/>
+<circle class='pt' cx='372.333333333333' cy='123.07' r='3.3'/>
+<circle class='pt' cx='372.846666666667' cy='125.6' r='3.3'/>
+<circle class='pt' cx='373.188888888889' cy='143.86' r='3.3'/>
+<circle class='pt' cx='373.36' cy='148.48' r='3.3'/>
+<circle class='pt' cx='373.188888888889' cy='120.98' r='3.3'/>
+<circle class='pt' cx='372.846666666667' cy='123.95' r='3.3'/>
+<circle class='pt' cx='372.333333333333' cy='141.33' r='3.3'/>
+<circle class='pt' cx='371.82' cy='124.39' r='3.3'/>
+<circle class='pt' cx='370.793333333333' cy='124.94' r='3.3'/>
+<circle class='pt' cx='370.108888888889' cy='124.06' r='3.3'/>
+<circle class='pt' cx='369.595555555556' cy='131.54' r='3.3'/>
+<circle class='pt' cx='369.595555555556' cy='131.21' r='3.3'/>
+<circle class='pt' cx='369.424444444444' cy='132.75' r='3.3'/>
+<circle class='pt' cx='369.082222222222' cy='150.68' r='3.3'/>
+<circle class='pt' cx='368.568888888889' cy='128.9' r='3.3'/>
+<circle class='pt' cx='368.226666666667' cy='127.69' r='3.3'/>
+<circle class='pt' cx='367.884444444444' cy='125.82' r='3.3'/>
+<circle class='pt' cx='367.2' cy='101.29' r='3.3'/>
+<circle class='pt' cx='365.66' cy='133.52' r='3.3'/>
+<circle class='pt' cx='363.948888888889' cy='138.91' r='3.3'/>
+<circle class='pt' cx='362.751111111111' cy='157.94' r='3.3'/>
+<circle class='pt' cx='361.553333333333' cy='161.68' r='3.3'/>
+<circle class='pt' cx='360.184444444444' cy='144.08' r='3.3'/>
+<circle class='pt' cx='358.302222222222' cy='143.64' r='3.3'/>
+<circle class='pt' cx='356.248888888889' cy='163.22' r='3.3'/>
+<circle class='pt' cx='354.537777777778' cy='148.04' r='3.3'/>
+<circle class='pt' cx='352.826666666667' cy='152.77' r='3.3'/>
+<circle class='pt' cx='350.773333333333' cy='169.38' r='3.3'/>
+<circle class='pt' cx='348.891111111111' cy='156.95' r='3.3'/>
+<text x='450' y='625' text-anchor='middle' font-size='16'>Predicted scan time (s)</text><text transform='translate(25 340) rotate(-90)' text-anchor='middle' font-size='16'>Actual scan time (s)</text>
+<line class='fit' x1='570' y1='52' x2='605' y2='52'/><text x='613' y='57' font-size='13'>Linear fit</text><line class='one' x1='715' y1='52' x2='750' y2='52'/><text x='758' y='57' font-size='13'>1:1</text>
+<text x='115' y='105' font-size='15' font-weight='bold'>Actual = 90 × predicted + 0.079 s</text><text x='115' y='127' font-size='14'>R² = 0.9927; n = 168</text>
+</svg>

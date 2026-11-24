@@ -24,9 +24,12 @@ maxDocsRoot   = "C:\Users\SCIENTIFICA\Documents\MaxHarkins";
 labBoxRoot    = "C:\Users\SCIENTIFICA\Box\Zhang&Brown";
 wpv3Root      = "C:\Users\SCIENTIFICA\Documents\MaxHarkins\WPv3";
 
+
 % Suppress expected warnings when removing paths that are not currently set.
 warning('off', 'MATLAB:rmpath:DirNotFound');
 cleanupObj = onCleanup(@() warning('on', 'MATLAB:rmpath:DirNotFound')); %#ok<NASGU>
+
+rmpath(genpath("C:\Users\SCIENTIFICA\Documents\MaxHarkins\ScanImage (Sandbox)")) %TODO fix
 
 switch lower(string(workspaceName))
     case "original"

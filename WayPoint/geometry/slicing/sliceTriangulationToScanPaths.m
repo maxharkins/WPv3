@@ -474,6 +474,8 @@ isClosed = hypot(poly(1,1)-poly(end,1), poly(1,2)-poly(end,2)) < 1e-12;
 % Arc-length
 d = hypot(diff(poly(:,1)), diff(poly(:,2)));
 s = [0; cumsum(d)];
+[s, uniqueIdx] = unique(s, 'stable');
+poly = poly(uniqueIdx,:);
 L = s(end);
 
 if L < spacing

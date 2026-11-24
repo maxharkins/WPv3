@@ -13,7 +13,7 @@ function [stats, model] = playPreexistingPathSIStyle(hX, hY, x_um, y_um, PDT_s, 
 % Name/Value:
 %   'BeamWaistDiameter_um' ([]) beam waist diameter [um]
 %   'Dot_um'               (0.80) legacy alias for beam waist diameter
-%   'OverlapFraction'      (0.75) desired fractional overlap [0..1) for spacing from beam waist
+%   'OverlapFraction'      (0.50) desired fractional overlap [0..1) for spacing from beam waist
 %   'RasterSpacing_um'     ([]) explicit spacing override [um]
 %   'Model'                ([]) micronsToDegrees model
 %   'LeadIn_s'             (0) lead samples at first point (beam OFF)
@@ -32,7 +32,7 @@ function [stats, model] = playPreexistingPathSIStyle(hX, hY, x_um, y_um, PDT_s, 
 p = inputParser;
 p.addParameter('BeamWaistDiameter_um', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0));
 p.addParameter('Dot_um', 0.80, @(x) isnumeric(x) && isscalar(x) && x > 0);
-p.addParameter('OverlapFraction', 0.75, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x < 1);
+p.addParameter('OverlapFraction', 0.50, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0 && x < 1);
 p.addParameter('RasterSpacing_um', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0));
 p.addParameter('Model', [], @(x) true);
 p.addParameter('LeadIn_s', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);

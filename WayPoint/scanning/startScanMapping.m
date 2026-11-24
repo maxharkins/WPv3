@@ -226,7 +226,7 @@ function startScanMapping(hWP)
             moveStart = string(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss.SSS'));
             tic
             try
-                hWP.hSI.hMotors.moveSampleNoQuery([NaN, NaN, zWorld], true);
+                hWP.hSI.hMotors.moveSample([NaN, NaN, zWorld], true);
             catch ME
                 warning('Z move failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 moveErr = string(ME.message);
@@ -237,6 +237,8 @@ function startScanMapping(hWP)
             moveElapsed = toc;
             zTracked_um = zWorld;
             syncStageZState(hWP, zTracked_um);
+
+            fprintf("Time spent in motion: %.3f s\n", moveElapsed)
 
             % ---- XY path (translate AFTER Z success)
             rawPath = tilePaths{zIdx};
@@ -275,7 +277,7 @@ function startScanMapping(hWP)
             end
             estimatedTime_s = (totalLength_um / rasterSpacing_um) * PDT_s + numel(chunks) * (leadS + tailS);
 
-            fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s\n', ...
+            fprintf('Tile %d Z %d   | Z=%.2f µm | %.3f s', ...
                     tileIdx, zIdx, zWorld, estimatedTime_s);
 
             % ---- execute scan
@@ -284,7 +286,7 @@ function startScanMapping(hWP)
             errMsg = moveErr;
             cancelledDuringLayer = false;
             try
-                fprintf("Num chunk: %d\n",numel(chunks))
+                %fprintf("Num chunk: %d\n",numel(chunks))
                 for cIdx = 1:numel(chunks)
                     if waitAtSafeBoundary(hWP)
                         cancelledDuringLayer = true;
@@ -310,6 +312,7 @@ function startScanMapping(hWP)
                     %     'EndHold_s', tailS, ...
                     %     'ParkWhenDone', false);
                     segXY = flipud(segXY);
+                    tic
                     playPreexistingPathSIStyle( ...
                          hX, hY, ...
                          segXY(:,1), segXY(:,2), ...
@@ -321,12 +324,15 @@ function startScanMapping(hWP)
                         'TurnBlank_s', 0.02e-3, ...
                         'LeadIn_s', 0, 'TailOut_s', 0, ...
                         'AllowUnsyncedBeam', true);
+                    t_scan_time = toc;
+                    fprintf(' | actual time scanned: %.3f s\n', t_scan_time);
 
                     % Yield after every finite DAQ waveform so Pause and
                     % Cancel remain responsive within large Z layers.
                     drawnow;
                 end
             catch ME
+                fprintf('\n')
                 warning('Scan failed (Tile %d Z %d): %s', tileIdx, zIdx, ME.message);
                 status = "scan_failed";
                 errMsg = string(ME.message);
